@@ -54,7 +54,7 @@ export function DebugMode({ mergedState }: DebugModeProps) {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <MetricCard label="FSR Left" value={disp(walker.fsrLeft)} />
             <MetricCard label="FSR Right" value={disp(walker.fsrRight)} />
-            <MetricCard label="Steps" value={disp(walker.steps ?? metrics.steps)} accent="good" />
+            <MetricCard label="Steps (Camera)" value={disp(vision.stepCount ?? metrics.steps ?? walker.steps)} accent="good" />
             <MetricCard label="Tilt Deg" value={disp(walker.tiltDeg ?? metrics.tiltDeg)} accent={Number(walker.tiltDeg ?? metrics.tiltDeg ?? 0) > 25 ? 'warn' : 'normal'} />
             <MetricCard label="Reliance" value={disp(metrics.reliance)} />
             <MetricCard label="Balance" value={disp(metrics.balance)} />

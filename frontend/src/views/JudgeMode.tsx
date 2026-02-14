@@ -90,7 +90,7 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
         tone: fall ? 'calm' : 'energetic',
         userPrompt: text.trim() || undefined,
         context: {
-          steps: Number(metrics.steps || 0),
+          steps: Number(vision.stepCount ?? metrics.steps ?? 0),
           tiltDeg: Number(metrics.tiltDeg || 0),
           balance: Number(metrics.balance || 0),
           cadence: Number.isFinite(cadence) ? cadence : undefined,
@@ -143,7 +143,7 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
         tone: 'calm',
         userPrompt: question,
         context: {
-          steps: Number(metrics.steps || 0),
+          steps: Number(vision.stepCount ?? metrics.steps ?? 0),
           tiltDeg: Number(metrics.tiltDeg || 0),
           balance: Number(metrics.balance || 0),
           cadence: Number(vision.cadenceSpm || 0),
@@ -190,7 +190,7 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
             </button>
             <div className="rounded-xl bg-slate-800 p-4 text-slate-100">
               <p className="text-sm font-semibold">Daily Goal Progress</p>
-              <p className="mt-1 text-lg font-bold">{Math.min(100, Math.round((Number(metrics.steps || 0) / 500) * 100))}% of 500-step target</p>
+              <p className="mt-1 text-lg font-bold">{Math.min(100, Math.round((Number(vision.stepCount ?? metrics.steps ?? 0) / 500) * 100))}% of 500-step target</p>
               <p className="mt-2 text-sm text-slate-300">{suggestion}</p>
             </div>
           </div>
@@ -204,8 +204,8 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
             </div>
 
             <div className="text-center">
-              <p className="text-sm text-slate-300">Step Count</p>
-              <p className="text-7xl font-black leading-none text-white sm:text-8xl">{display(metrics.steps)}</p>
+              <p className="text-sm text-slate-300">Step Count (Camera)</p>
+              <p className="text-7xl font-black leading-none text-white sm:text-8xl">{display(vision.stepCount ?? metrics.steps)}</p>
             </div>
 
             <div className={`rounded-xl px-4 py-3 text-center text-xl font-black ${fall ? 'bg-rose-700 text-white' : 'bg-emerald-700 text-white'}`}>

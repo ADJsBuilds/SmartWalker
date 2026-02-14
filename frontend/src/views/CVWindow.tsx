@@ -58,7 +58,7 @@ export function CVWindow() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Steps" value={disp(metrics.steps)} />
+        <MetricCard label="Steps (Camera)" value={disp(vision.stepCount ?? metrics.steps)} />
         <MetricCard label="Cadence" value={disp(vision.cadenceSpm)} />
         <MetricCard label="StepVar" value={disp(vision.stepVar)} />
         <MetricCard label="Tilt" value={disp(metrics.tiltDeg)} />

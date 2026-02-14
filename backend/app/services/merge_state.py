@@ -20,7 +20,10 @@ def compute_merged(resident_id: str) -> Dict[str, Any]:
     balance = (fsr_left - fsr_right) / total
 
     tilt = (w or {}).get('tiltDeg')
-    steps = (w or {}).get('steps')
+    # Prioritize camera/vision step count (more accurate) over walker sensor steps
+    vision_step_count = (v or {}).get('stepCount') or (v or {}).get('step_count')
+    walker_steps = (w or {}).get('steps')
+    steps = vision_step_count if vision_step_count is not None else walker_steps
 
     fall_from_vision = bool((v or {}).get('fallSuspected', False))
     walker_tipped = (tilt is not None) and (tilt >= 60)
