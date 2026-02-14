@@ -181,4 +181,13 @@ def download_report(report_id: str, db: Session = Depends(get_db)):
     path = Path(report.pdf_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail='report file missing')
-    return FileResponse(path, media_type='application/pdf', filename=path.name)
+    return FileResponse(
+        path,
+        media_type='application/pdf',
+        filename=path.name,
+        headers={
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        },
+    )

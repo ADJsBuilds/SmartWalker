@@ -145,6 +145,7 @@ function ClinicianPanel() {
   const [docs, setDocs] = useState<Array<{ docId: string; filename: string }>>([]);
   const [preview, setPreview] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [usePlaceholderData, setUsePlaceholderData] = useState(true);
   const [reportUrl, setReportUrl] = useState<string | null>(null);
   const [inlineNotice, setInlineNotice] = useState<string>('');
 
@@ -181,8 +182,11 @@ function ClinicianPanel() {
 
   const generateReport = async () => {
     try {
-      const reportId = await apiClient.generateDailyReport(activeResidentId, date);
-      if (reportId) setReportUrl(apiClient.getDailyReportDownloadUrl(reportId));
+      const reportId = await apiClient.generateDailyReport(activeResidentId, date, usePlaceholderData);
+      if (reportId) {
+        const cacheBust = `ts=${Date.now()}`;
+        setReportUrl(`${apiClient.getDailyReportDownloadUrl(reportId)}?${cacheBust}`);
+      }
       else notify('Reports endpoint responded without report id.', 'warn');
     } catch {
       notify('Reports endpoint not implemented yet.', 'warn');
@@ -209,6 +213,10 @@ function ClinicianPanel() {
       </div>
       <div className="space-y-3 rounded-xl bg-slate-950 p-3">
         <h4 className="text-sm font-bold uppercase tracking-wide text-slate-300">Reports + Preview</h4>
+        <label className="flex items-center gap-2 text-xs text-slate-200">
+          <input type="checkbox" checked={usePlaceholderData} onChange={(e) => setUsePlaceholderData(e.target.checked)} />
+          Use placeholder values for testing
+        </label>
         <div className="flex items-end gap-2">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white" />
           <button type="button" onClick={generateReport} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white">

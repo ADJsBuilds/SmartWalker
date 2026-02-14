@@ -122,9 +122,10 @@ export class ApiClient {
     return this.request(`/api/documents/${encodeURIComponent(docId)}`, { method: 'GET' });
   }
 
-  async generateDailyReport(residentId: string, date: string): Promise<string | null> {
+  async generateDailyReport(residentId: string, date: string, usePlaceholder = false): Promise<string | null> {
+    const placeholderParam = usePlaceholder ? '&usePlaceholder=true' : '';
     const raw = await this.request<Record<string, unknown>>(
-      `/api/reports/daily/generate?residentId=${encodeURIComponent(residentId)}&date=${encodeURIComponent(date)}`,
+      `/api/reports/daily/generate?residentId=${encodeURIComponent(residentId)}&date=${encodeURIComponent(date)}${placeholderParam}`,
       { method: 'POST' },
     );
     return parseReportId(raw);
