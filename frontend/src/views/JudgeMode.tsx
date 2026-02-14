@@ -20,7 +20,6 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   const [isListening, setListening] = useState(false);
   const [liveAgentStatus, setLiveAgentStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'>('idle');
   const [liveAgentTranscript, setLiveAgentTranscript] = useState<string>('');
-  const [liteSessionId, setLiteSessionId] = useState('');
   const [liteSpeakText, setLiteSpeakText] = useState('Hello from ElevenLabs on SmartWalker.');
   const [liteSpeakBusy, setLiteSpeakBusy] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -183,31 +182,27 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   };
 
   const speakViaElevenLabs = async () => {
-    const sessionId = liteSessionId.trim();
     const text = liteSpeakText.trim();
-    if (!sessionId) {
-      notify('Enter a LITE session ID first.', 'warn');
-      return;
-    }
     if (!text) {
       notify('Enter text to synthesize.', 'warn');
       return;
     }
+    let objectUrl = '';
     try {
       setLiteSpeakBusy(true);
-      const result = await apiClient.sendLiveAvatarLiteSpeakText({
-        session_id: sessionId,
+      const audioBlob = await apiClient.speakElevenLabs({
         text,
-        interrupt_before_speak: true,
       });
-      if (!result.ok) {
-        notify(result.error || 'ElevenLabs speech request failed.', 'warn');
-        return;
-      }
-      notify('ElevenLabs speech request sent.', 'info');
+      objectUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(objectUrl);
+      await audio.play();
+      notify('Playing ElevenLabs voice.', 'info');
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'ElevenLabs speech request failed.', 'warn');
+      notify(error instanceof Error ? error.message : 'ElevenLabs speech playback failed.', 'warn');
     } finally {
+      if (objectUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+      }
       setLiteSpeakBusy(false);
     }
   };
@@ -297,13 +292,7 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
               Play Coach
             </button>
             <div className="rounded-xl border border-slate-700 bg-slate-950 p-3">
-              <p className="text-xs font-semibold text-slate-300">ElevenLabs LITE Test (main page)</p>
-              <input
-                value={liteSessionId}
-                onChange={(event) => setLiteSessionId(event.target.value)}
-                placeholder="Paste active LITE session_id"
-                className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-              />
+              <p className="text-xs font-semibold text-slate-300">ElevenLabs Voice Test (no LiveAvatar required)</p>
               <textarea
                 value={liteSpeakText}
                 onChange={(event) => setLiteSpeakText(event.target.value)}

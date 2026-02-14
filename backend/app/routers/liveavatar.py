@@ -1,8 +1,10 @@
 import logging
+from io import BytesIO
 from typing import Any, Dict, Literal, Optional
+import wave
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from app.agents.lite_agent import lite_agent_manager
@@ -79,6 +81,22 @@ class LiteSpeakTextPayload(BaseModel):
     voice_id: Optional[str] = None
     model_id: Optional[str] = None
     interrupt_before_speak: bool = True
+
+
+class ElevenLabsSpeakPayload(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+    model_id: Optional[str] = None
+
+
+def _pcm16le_24k_mono_to_wav_bytes(pcm: bytes) -> bytes:
+    out = BytesIO()
+    with wave.open(out, 'wb') as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(24000)
+        wav_file.writeframes(pcm)
+    return out.getvalue()
 
 
 @router.post('/api/liveavatar/lite/create', response_model=LiteCreateResponse)
@@ -230,4 +248,25 @@ async def speak_text_lite(payload: LiteSpeakTextPayload):
     if payload.interrupt_before_speak:
         await lite_agent_manager.send_interrupt(payload.session_id)
     return await lite_agent_manager.speak_pcm(payload.session_id, tts_result.get('pcm') or b'')
+
+
+@router.post('/api/elevenlabs/speak')
+async def elevenlabs_speak(payload: ElevenLabsSpeakPayload):
+    tts_result = await ElevenLabsTTSService().synthesize_pcm24(
+        text=payload.text,
+        voice_id=payload.voice_id,
+        model_id=payload.model_id,
+    )
+    if not tts_result.get('ok'):
+        return JSONResponse(
+            status_code=502,
+            content={'ok': False, 'error': str(tts_result.get('error') or 'TTS synthesis failed')},
+        )
+
+    pcm = tts_result.get('pcm') or b''
+    if not pcm:
+        return JSONResponse(status_code=502, content={'ok': False, 'error': 'ElevenLabs returned empty audio'})
+
+    wav_bytes = _pcm16le_24k_mono_to_wav_bytes(pcm)
+    return Response(content=wav_bytes, media_type='audio/wav')
 

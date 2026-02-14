@@ -51,6 +51,36 @@ function parseReportId(raw: unknown): string | null {
 export class ApiClient {
   constructor(private readonly baseUrl: string) {}
 
+  private async requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(init?.headers || {}),
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      const parsed = text ? safeJsonParse(text) : null;
+      let message = response.statusText || 'Request failed';
+      if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
+        const detail = (parsed as Record<string, unknown>).detail;
+        if (detail !== undefined && detail !== null && String(detail).trim()) {
+          message = String(detail);
+        }
+      } else if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+        const error = (parsed as Record<string, unknown>).error;
+        if (error !== undefined && error !== null && String(error).trim()) {
+          message = String(error);
+        }
+      }
+      throw new ApiError({ status: response.status, message, details: parsed });
+    }
+
+    return response.blob();
+  }
+
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response;
     try {
@@ -242,6 +272,10 @@ export class ApiClient {
     interrupt_before_speak?: boolean;
   }): Promise<{ ok: boolean; error?: string }> {
     return this.request('/api/liveavatar/lite/speak-text', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  speakElevenLabs(payload: { text: string; voice_id?: string; model_id?: string }): Promise<Blob> {
+    return this.requestBlob('/api/elevenlabs/speak', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 
