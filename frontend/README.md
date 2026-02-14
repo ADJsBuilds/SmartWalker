@@ -39,6 +39,16 @@ Default fallback: `http://localhost:8000`
   - Live Exercise Dashboard
 - `/cv` standalone Computer Vision window (independent WebSocket connection)
 
+## Render Deploy
+
+Repository includes a root `render.yaml` blueprint that defines:
+- `smartwalker-backend` (Python web service from `backend/`)
+- `smartwalker-frontend` (static site from `frontend/`)
+
+After import on Render:
+- Update `VITE_API_BASE_URL` to your actual backend URL if service name differs.
+- Keep secrets (`HEYGEN_API_KEY`, `OPENEVIDENCE_API_KEY`, etc.) in Render env vars.
+
 ## Resilience and Fallbacks
 
 - Missing endpoints (`404/405/501`) show **Not implemented yet** notices.

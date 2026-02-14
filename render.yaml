@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: smartwalker-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: prod
+      - key: DATABASE_URL
+        value: sqlite:///./data/app.db
+      - key: STORAGE_DIR
+        value: ./data
+      - key: CORS_ALLOW_ORIGINS
+        value: "*"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: HEYGEN_API_KEY
+        sync: false
+      - key: HEYGEN_BASE_URL
+        sync: false
+      - key: OPENEVIDENCE_API_KEY
+        sync: false
+      - key: OPENEVIDENCE_BASE_URL
+        sync: false
+
+  - type: web
+    name: smartwalker-frontend
+    runtime: static
+    rootDir: frontend
+    plan: free
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://smartwalker-backend.onrender.com
