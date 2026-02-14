@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import App from './App';
 import { CvPage } from './pages/CvPage';
+import { UserView } from './views/UserView';
 import { RealtimeStateProvider } from './store/realtimeState';
 import './index.css';
 
@@ -13,6 +14,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/cv" element={<CvPage />} />
+          <Route path="/user" element={<UserView />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </RealtimeStateProvider>
