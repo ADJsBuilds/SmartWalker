@@ -1,5 +1,6 @@
 import logging
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -14,8 +15,13 @@ class LiveAgentClient:
         self.settings = get_settings()
 
     def _base_url(self) -> str:
-        base = (self.settings.liveagent_base_url or self.settings.heygen_base_url or 'https://api.heygen.com').rstrip('/')
-        return base
+        if self.settings.liveagent_base_url:
+            return self.settings.liveagent_base_url.rstrip('/')
+        if self.settings.heygen_base_url:
+            parsed = urlparse(self.settings.heygen_base_url)
+            if parsed.scheme and parsed.netloc:
+                return f'{parsed.scheme}://{parsed.netloc}'
+        return 'https://api.heygen.com'
 
     def _api_key(self) -> str:
         return (self.settings.liveagent_api_key or self.settings.heygen_api_key or '').strip()
@@ -34,31 +40,75 @@ class LiveAgentClient:
         if not self._api_key():
             return {'ok': False, 'error': 'LIVEAGENT_API_KEY/HEYGEN_API_KEY not configured', 'raw': None}
 
-        url = f'{self._base_url()}/v1/sessions/token'
+        base = self._base_url()
+        candidate_urls = [
+            f'{base}/v1/sessions/token',
+            f'{base}/v1/session/token',
+            f'{base}/v1/liveavatar/sessions/token',
+        ]
+
         timeout = httpx.Timeout(20.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, json=payload, headers=self._headers())
-            response.raise_for_status()
-            raw = response.json()
-            token = _extract_first_string(raw, {'session_access_token', 'sessionAccessToken', 'token', 'access_token'})
-            session_id = _extract_first_string(raw, {'session_id', 'sessionId'})
+            last_error: Optional[str] = None
+            for url in candidate_urls:
+                try:
+                    response = await client.post(url, json=payload, headers=self._headers())
+                    response.raise_for_status()
+                    raw = response.json()
+                    token = _extract_first_string(raw, {'session_access_token', 'sessionAccessToken', 'token', 'access_token'})
+                    session_id = _extract_first_string(raw, {'session_id', 'sessionId'})
+                    return {
+                        'ok': bool(token),
+                        'sessionAccessToken': token,
+                        'sessionId': session_id,
+                        'raw': raw,
+                        'tokenEndpoint': url,
+                    }
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        last_error = f'404 at {url}'
+                        continue
+                    raise
+                except httpx.RequestError as exc:
+                    last_error = str(exc)
+                    continue
             return {
-                'ok': bool(token),
-                'sessionAccessToken': token,
-                'sessionId': session_id,
-                'raw': raw,
+                'ok': False,
+                'error': f'Unable to create token. Tried endpoints: {", ".join(candidate_urls)}. Last error: {last_error or "unknown"}',
+                'raw': None,
             }
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1), reraise=True)
     async def stop_session(self, session_id: str) -> Dict[str, Any]:
         if not self._api_key():
             return {'ok': False, 'error': 'LIVEAGENT_API_KEY/HEYGEN_API_KEY not configured', 'raw': None}
-        url = f'{self._base_url()}/v1/sessions/{session_id}/stop'
+        base = self._base_url()
+        candidate_urls = [
+            f'{base}/v1/sessions/{session_id}/stop',
+            f'{base}/v1/session/{session_id}/stop',
+            f'{base}/v1/liveavatar/sessions/{session_id}/stop',
+        ]
         timeout = httpx.Timeout(15.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, headers=self._headers())
-            response.raise_for_status()
-            return {'ok': True, 'raw': response.json() if response.text else {}}
+            last_error: Optional[str] = None
+            for url in candidate_urls:
+                try:
+                    response = await client.post(url, headers=self._headers())
+                    response.raise_for_status()
+                    return {'ok': True, 'raw': response.json() if response.text else {}, 'stopEndpoint': url}
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        last_error = f'404 at {url}'
+                        continue
+                    raise
+                except httpx.RequestError as exc:
+                    last_error = str(exc)
+                    continue
+            return {
+                'ok': False,
+                'error': f'Unable to stop session. Tried endpoints: {", ".join(candidate_urls)}. Last error: {last_error or "unknown"}',
+                'raw': None,
+            }
 
 
 def _extract_first_string(value: Any, keys: set[str]) -> Optional[str]:

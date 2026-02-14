@@ -187,11 +187,12 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
               </button>
               <button
                 type="button"
+                disabled={liveAgentStatus !== 'connected'}
                 onMouseDown={() => liveAgentRef.current?.startListening()}
                 onMouseUp={() => liveAgentRef.current?.stopListening()}
                 onTouchStart={() => liveAgentRef.current?.startListening()}
                 onTouchEnd={() => liveAgentRef.current?.stopListening()}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Hold to Talk
               </button>
