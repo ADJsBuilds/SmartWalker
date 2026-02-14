@@ -10,7 +10,6 @@ import type {
   LiveAgentSessionStartResponse,
   LiveAgentSessionTokenResponse,
   LiveAvatarLiteCreateResponse,
-  LiveAvatarLiteSpeakResponse,
   LiveAvatarLiteSessionStatus,
   LiveAvatarLiteStartResponse,
   LiveAvatarLiteStopResponse,
@@ -123,10 +122,9 @@ export class ApiClient {
     return this.request(`/api/documents/${encodeURIComponent(docId)}`, { method: 'GET' });
   }
 
-  async generateDailyReport(residentId: string, date: string, usePlaceholder = false): Promise<string | null> {
-    const placeholderParam = usePlaceholder ? '&usePlaceholder=true' : '';
+  async generateDailyReport(residentId: string, date: string): Promise<string | null> {
     const raw = await this.request<Record<string, unknown>>(
-      `/api/reports/daily/generate?residentId=${encodeURIComponent(residentId)}&date=${encodeURIComponent(date)}${placeholderParam}`,
+      `/api/reports/daily/generate?residentId=${encodeURIComponent(residentId)}&date=${encodeURIComponent(date)}`,
       { method: 'POST' },
     );
     return parseReportId(raw);
@@ -222,16 +220,6 @@ export class ApiClient {
 
   sendLiveAvatarLiteTestTone(payload: { session_id: string; duration_seconds?: number; frequency_hz?: number }): Promise<{ ok: boolean; error?: string }> {
     return this.request('/api/liveavatar/lite/test-tone', { method: 'POST', body: JSON.stringify(payload) });
-  }
-
-  sendLiveAvatarLiteSpeakText(payload: {
-    session_id: string;
-    text: string;
-    voice_id?: string;
-    model_id?: string;
-    interrupt_before_speak?: boolean;
-  }): Promise<LiveAvatarLiteSpeakResponse> {
-    return this.request('/api/liveavatar/lite/speak-text', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 

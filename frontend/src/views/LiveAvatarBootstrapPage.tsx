@@ -8,7 +8,6 @@ export function LiveAvatarBootstrapPage() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [speakText, setSpeakText] = useState('This is a LiveAvatar LITE ElevenLabs synthesis check.');
   const videoHostRef = useRef<HTMLDivElement | null>(null);
   const pushLog = (message: string) => setLogLines((prev) => [message, ...prev].slice(0, 24));
 
@@ -89,20 +88,7 @@ export function LiveAvatarBootstrapPage() {
             >
               Interrupt
             </button>
-            <button
-              type="button"
-              onClick={() => void manager.speakText(speakText)}
-              className="rounded-xl bg-indigo-700 px-4 py-2 font-bold text-white"
-            >
-              Speak Text (ElevenLabs)
-            </button>
           </div>
-          <textarea
-            value={speakText}
-            onChange={(e) => setSpeakText(e.target.value)}
-            className="mt-3 h-20 w-full rounded-xl bg-slate-800 px-3 py-2 text-sm text-slate-100"
-            placeholder="Type text to synthesize with ElevenLabs"
-          />
         </div>
 
         <div className="h-[60vh] rounded-2xl bg-slate-900 p-3">

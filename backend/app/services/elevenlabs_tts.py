@@ -66,20 +66,20 @@ class ElevenLabsTTSService:
                 try:
                     response = await client.post(url, headers=headers, params=params, json=payload)
                     response.raise_for_status()
-                    pcm_bytes = response.content
-                    if not pcm_bytes:
+                    audio_bytes = response.content
+                    if not audio_bytes:
                         return {'ok': False, 'error': 'ElevenLabs returned empty audio response'}
-                    return {'ok': True, 'pcm': pcm_bytes}
+                    return {'ok': True, 'pcm': audio_bytes}
                 except httpx.HTTPStatusError as exc:
                     status = exc.response.status_code
                     body = (exc.response.text or '')[:300]
-                    logger.warning('ElevenLabs TTS request failed: status=%s url=%s body=%s', status, url, body)
+                    logger.warning('ElevenLabs TTS failed: status=%s url=%s body=%s', status, url, body)
                     last_error = f'HTTP {status}: {body or "request failed"}'
                     if status in (404, 405):
                         continue
                     return {'ok': False, 'error': last_error}
                 except httpx.RequestError as exc:
-                    logger.error('ElevenLabs TTS request error: %s', exc)
+                    logger.error('ElevenLabs request error: %s', exc)
                     last_error = str(exc)
                     continue
             return {'ok': False, 'error': f'Unable to synthesize speech. Last error: {last_error}'}

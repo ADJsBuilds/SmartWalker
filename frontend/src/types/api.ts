@@ -170,13 +170,6 @@ export interface LiveAvatarLiteStopResponse {
   raw?: Record<string, unknown> | null;
 }
 
-export interface LiveAvatarLiteSpeakResponse {
-  ok: boolean;
-  error?: string;
-  event_id?: string;
-  chunk_count?: number;
-}
-
 export interface LiveAvatarLiteSessionStatus {
   exists: boolean;
   session_id?: string;
