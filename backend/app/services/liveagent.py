@@ -24,11 +24,11 @@ class LiveAgentClient:
         self.settings = get_settings()
 
     def _base_url(self) -> str:
-        base = (self.settings.liveagent_base_url or '').strip()
+        base = (self.settings.liveavatar_base_url or self.settings.liveagent_base_url or '').strip()
         return (base or 'https://api.liveavatar.com').rstrip('/')
 
     def _api_key(self) -> str:
-        return (self.settings.liveagent_api_key or self.settings.heygen_api_key or '').strip()
+        return (self.settings.liveavatar_api_key or self.settings.liveagent_api_key or self.settings.heygen_api_key or '').strip()
 
     def _provider_headers(self) -> Dict[str, str]:
         headers = {
@@ -48,7 +48,7 @@ class LiveAgentClient:
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1), reraise=True)
     async def create_session_token(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self._api_key():
-            return {'ok': False, 'error': 'LIVEAGENT_API_KEY/HEYGEN_API_KEY not configured', 'raw': None}
+            return {'ok': False, 'error': 'LIVEAVATAR_API_KEY not configured', 'raw': None}
 
         url = f'{self._base_url()}/v1/sessions/token'
         try:
@@ -79,11 +79,11 @@ class LiveAgentClient:
         }
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1), reraise=True)
-    async def start_session(self, session_token: str) -> Dict[str, Any]:
+    async def start_session(self, session_token: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         if not self._api_key():
-            return {'ok': False, 'error': 'LIVEAGENT_API_KEY/HEYGEN_API_KEY not configured', 'raw': None}
+            return {'ok': False, 'error': 'LIVEAVATAR_API_KEY not configured', 'raw': None}
 
-        session_id = _extract_session_id_from_jwt(session_token)
+        session_id = session_id or _extract_session_id_from_jwt(session_token)
         if not session_id:
             return {'ok': False, 'error': 'Unable to derive session_id from session token', 'raw': None}
 
@@ -121,7 +121,7 @@ class LiveAgentClient:
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1), reraise=True)
     async def stop_session(self, session_id: str) -> Dict[str, Any]:
         if not self._api_key():
-            return {'ok': False, 'error': 'LIVEAGENT_API_KEY/HEYGEN_API_KEY not configured', 'raw': None}
+            return {'ok': False, 'error': 'LIVEAVATAR_API_KEY not configured', 'raw': None}
 
         urls = [
             f'{self._base_url()}/v1/sessions/{session_id}/stop',
@@ -147,6 +147,61 @@ class LiveAgentClient:
             return {
                 'ok': False,
                 'error': f'Unable to stop session. Tried endpoints: {", ".join(urls)}. Last error: {last_error or "unknown"}',
+                'raw': None,
+            }
+
+    @retry(stop=stop_after_attempt(2), wait=wait_fixed(1), reraise=True)
+    async def send_full_mode_event(self, session_token: str, session_id: str, text: str) -> Dict[str, Any]:
+        if not self._api_key():
+            return {'ok': False, 'error': 'LIVEAVATAR_API_KEY not configured', 'raw': None}
+        if not session_token:
+            return {'ok': False, 'error': 'session token is required', 'raw': None}
+        if not session_id:
+            return {'ok': False, 'error': 'session id is required', 'raw': None}
+        if not text.strip():
+            return {'ok': False, 'error': 'text is required', 'raw': None}
+
+        endpoints = [
+            (
+                f'{self._base_url()}/v1/sessions/{session_id}/events',
+                {'event': {'type': 'agent.say', 'text': text.strip()}},
+            ),
+            (
+                f'{self._base_url()}/v1/sessions/events',
+                {'session_id': session_id, 'event': {'type': 'agent.say', 'text': text.strip()}},
+            ),
+            (
+                f'{self._base_url()}/v1/sessions/{session_id}/messages',
+                {'text': text.strip()},
+            ),
+        ]
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+            last_error: Optional[str] = None
+            for url, payload in endpoints:
+                try:
+                    response = await client.post(url, json=payload, headers=self._session_headers(session_token))
+                    response.raise_for_status()
+                    raw = response.json() if response.text else {}
+                    if isinstance(raw, dict):
+                        code = raw.get('code')
+                        if code in (100, 1000, None):
+                            return {'ok': True, 'raw': raw}
+                    return {'ok': True, 'raw': raw}
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    body = exc.response.text[:300] if exc.response.text else ''
+                    logger.warning('LiveAvatar full-mode event endpoint failed: status=%s path=%s body=%s', status, url, body)
+                    if status in (404, 405, 422):
+                        last_error = f'HTTP {status} at {url}'
+                        continue
+                    return {'ok': False, 'error': f'HTTP {status}: provider event call failed', 'raw': None}
+                except httpx.RequestError as exc:
+                    last_error = str(exc)
+                    continue
+            return {
+                'ok': False,
+                'error': f'Unable to send event with known endpoint formats. Last error: {last_error or "unknown"}',
                 'raw': None,
             }
 

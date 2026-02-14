@@ -38,6 +38,7 @@ Default fallback: `http://localhost:8000`
 
 - `/` Grandma View by default, Proof View one tap away
 - `/cv` standalone CV window (independent websocket)
+- `/user` production user-facing LiveAvatar screen (full-screen avatar + orange press-to-talk button)
 - `/liveavatar-test` LiveAvatar bootstrap + LiveKit connection test page
 
 ## LiveAvatar Test Page

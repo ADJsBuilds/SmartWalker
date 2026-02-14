@@ -35,12 +35,12 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   }, [fall, isExercising]);
 
   useEffect(() => {
-    liveAgentRef.current = new LiveAgentController();
+    liveAgentRef.current = new LiveAgentController(apiClient);
     return () => {
       liveAgentRef.current?.disconnect();
       liveAgentRef.current = null;
     };
-  }, []);
+  }, [apiClient]);
 
   const connectLiveAgent = async () => {
     if (!coachVideoRef.current) {
@@ -48,19 +48,24 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
       return;
     }
     try {
-      const tokenResult = await apiClient.createLiveAgentSessionToken({
+      const bootstrap = await apiClient.bootstrapLiveAgentSession({
         residentId: activeResidentId,
+        mode: 'FULL',
         interactivityType: 'PUSH_TO_TALK',
+        language: 'en',
       });
-      if (!tokenResult.ok || !tokenResult.sessionAccessToken) {
-        notify(tokenResult.error || 'Failed to create LiveAgent session token.', 'warn');
+      if (!bootstrap.ok || !bootstrap.livekitUrl || !bootstrap.livekitClientToken) {
+        notify(bootstrap.error || 'Failed to bootstrap LiveAgent session.', 'warn');
         return;
       }
 
-      await liveAgentRef.current?.connect(tokenResult.sessionAccessToken, coachVideoRef.current, {
+      await liveAgentRef.current?.connectWithLiveKit(bootstrap.livekitUrl, bootstrap.livekitClientToken, coachVideoRef.current, {
         onStatus: setLiveAgentStatus,
         onAgentTranscript: (text, speaker) => setLiveAgentTranscript(`${speaker}: ${text}`),
         onError: (message) => notify(message, 'warn'),
+      }, {
+        sessionId: bootstrap.sessionId,
+        sessionAccessToken: bootstrap.sessionAccessToken,
       });
       notify('LiveAgent connected.', 'info');
     } catch {
@@ -75,12 +80,12 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   };
 
   const playCoach = async (text: string) => {
-    if (liveAgentRef.current?.isConnected) {
-      liveAgentRef.current.speakText(text);
-      return;
-    }
+    const usedLiveAvatar = await liveAgentRef.current?.speakText(text);
+    if (usedLiveAvatar) return;
     speakText(text);
-    notify('LiveAgent not connected. Used browser voice fallback.', 'warn');
+    if (!liveAgentRef.current?.isConnected || !usedLiveAvatar) {
+      notify('LiveAgent not connected. Used browser voice fallback.', 'warn');
+    }
   };
 
   const startListening = () => {
@@ -109,14 +114,15 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
       const response = await apiClient.askAgent({ residentId: activeResidentId, question });
       setAgentResponse(response);
       const speakable = response.heygen?.textToSpeak || response.answer;
-      if (liveAgentRef.current?.isConnected) liveAgentRef.current.speakText(speakable);
-      else speakText(speakable);
+      const usedLiveAvatar = await liveAgentRef.current?.speakText(speakable);
+      if (!usedLiveAvatar) speakText(speakable);
     } catch (error) {
       const fallback = isNotImplementedError(error)
         ? { answer: `Coach fallback: ${question}. Keep going safely!`, citations: [] }
         : { answer: `Temporary fallback response: ${question}`, citations: [] };
       setAgentResponse(fallback);
-      speakText(fallback.answer);
+      const usedLiveAvatar = await liveAgentRef.current?.speakText(fallback.answer);
+      if (!usedLiveAvatar) speakText(fallback.answer);
       notify('Agent endpoint unavailable. Showing fallback response.', 'warn');
     }
   };

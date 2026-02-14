@@ -1,9 +1,11 @@
 import logging
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
+from app.core.config import get_settings
 from app.services.heygen import HeyGenClient
 from app.services.liveagent import LiveAgentClient
 from app.services.openevidence import OpenEvidenceClient, normalize_openevidence
@@ -24,7 +26,7 @@ class HeyGenPayload(BaseModel):
 class HeyGenSpeakPayload(BaseModel):
     text: str
     residentId: Optional[str] = None
-    voiceId: Optional[str] = None  # Optional override for voice selection
+    voiceId: Optional[str] = None
 
 
 class HeyGenSpeakResponse(BaseModel):
@@ -33,8 +35,6 @@ class HeyGenSpeakResponse(BaseModel):
     text: str
     residentId: Optional[str] = None
     videoUrl: Optional[str] = None
-    audioUrl: Optional[str] = None
-    providerStatus: Optional[str] = None
     error: Optional[str] = None
     raw: Optional[Dict[str, Any]] = None
 
@@ -42,11 +42,20 @@ class HeyGenSpeakResponse(BaseModel):
 class LiveAgentSessionTokenPayload(BaseModel):
     residentId: Optional[str] = None
     avatarId: Optional[str] = None
-    mode: str = 'FULL'
-    interactivityType: Optional[str] = None  # CONVERSATIONAL or PUSH_TO_TALK
-    isSandbox: Optional[bool] = None
-    language: Optional[str] = None
-    voiceId: Optional[str] = None
+    mode: Literal['FULL'] = 'FULL'
+    interactivityType: Literal['PUSH_TO_TALK'] = 'PUSH_TO_TALK'
+    language: str = 'en'
+
+    @field_validator('avatarId')
+    @classmethod
+    def validate_avatar_uuid(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return value
+        try:
+            uuid.UUID(value)
+            return value
+        except ValueError as exc:
+            raise ValueError('avatarId must be a valid UUID') from exc
 
 
 class LiveAgentSessionTokenResponse(BaseModel):
@@ -61,6 +70,7 @@ class LiveAgentSessionTokenResponse(BaseModel):
 
 class LiveAgentStartPayload(BaseModel):
     sessionToken: str
+    sessionId: Optional[str] = None
 
 
 class LiveAgentStartResponse(BaseModel):
@@ -75,8 +85,38 @@ class LiveAgentStartResponse(BaseModel):
     raw: Optional[Dict[str, Any]] = None
 
 
+class LiveAgentBootstrapResponse(BaseModel):
+    ok: bool
+    residentId: Optional[str] = None
+    sessionId: Optional[str] = None
+    sessionAccessToken: Optional[str] = None
+    livekitUrl: Optional[str] = None
+    livekitClientToken: Optional[str] = None
+    livekitAgentToken: Optional[str] = None
+    maxSessionDuration: Optional[int] = None
+    wsUrl: Optional[str] = None
+    error: Optional[str] = None
+    raw: Optional[Dict[str, Any]] = None
+
+
 class LiveAgentStopPayload(BaseModel):
     sessionId: str
+
+
+class LiveAgentSessionEventPayload(BaseModel):
+    sessionToken: str
+    sessionId: str
+    text: str
+
+
+class LiveAgentSessionEventResponse(BaseModel):
+    ok: bool
+    error: Optional[str] = None
+    raw: Optional[Dict[str, Any]] = None
+
+
+def _provider_raw(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    return value if get_settings().include_provider_raw else None
 
 
 @router.post('/api/integrations/openevidence')
@@ -92,188 +132,170 @@ async def openevidence_proxy(payload: OpenEvidencePayload):
 @router.post('/api/integrations/heygen')
 async def heygen_proxy(payload: HeyGenPayload):
     """
-    Generic HeyGen API proxy endpoint for custom payloads.
-    Use /api/heygen/speak for standard avatar video generation.
+    Deprecated passthrough endpoint kept for backward compatibility.
     """
     client = HeyGenClient()
     try:
         raw = await client.call(payload.payload)
-        return {'raw': raw}
+        return {'raw': raw, 'deprecated': True}
     except Exception as exc:
         logger.error(f'HeyGen proxy call failed: {exc}', exc_info=True)
         raise HTTPException(status_code=502, detail=f'heygen request failed: {exc}')
 
 
 @router.get('/api/heygen/avatars')
-async def list_heygen_avatars():
+async def list_heygen_avatars_deprecated():
+    raise HTTPException(status_code=410, detail='Deprecated. Use LiveAvatar avatar IDs.')
+
+
+@router.post('/api/heygen/speak')
+async def heygen_speak(payload: HeyGenSpeakPayload):
     """
-    List available HeyGen avatars.
-    
-    This endpoint attempts to fetch available avatars from HeyGen's API.
-    Note: This requires HEYGEN_API_KEY to be configured.
+    Deprecated endpoint kept temporarily to avoid breaking legacy coach actions.
     """
     client = HeyGenClient()
-    
-    if not client.settings.heygen_api_key:
-        raise HTTPException(status_code=400, detail='HEYGEN_API_KEY not configured')
-    
-    try:
-        # Try common HeyGen API endpoints for listing avatars
-        headers = {
-            'Authorization': f'Bearer {client.settings.heygen_api_key}',
-            'Content-Type': 'application/json',
-        }
-        
-        import httpx
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as http_client:
-            # Try the avatars endpoint
-            try:
-                response = await http_client.get(
-                    'https://api.heygen.com/v1/avatars',
-                    headers=headers,
-                )
-                if response.status_code == 200:
-                    return {'avatars': response.json(), 'source': 'api.heygen.com/v1/avatars'}
-            except Exception:
-                pass
-            
-            # Alternative: try avatar list endpoint
-            try:
-                response = await http_client.get(
-                    'https://api.heygen.com/v1/avatar/list',
-                    headers=headers,
-                )
-                if response.status_code == 200:
-                    return {'avatars': response.json(), 'source': 'api.heygen.com/v1/avatar/list'}
-            except Exception:
-                pass
-        
-        # If API endpoints don't work, return guidance
+    result = await client.generate_video(payload.text, payload.voiceId)
+    if result.get('success'):
         return {
-            'message': 'Could not fetch avatars from API. Check HeyGen dashboard directly.',
-            'guidance': {
-                'how_to_find': '1. Log into HeyGen dashboard\n2. Go to Avatars section\n3. Browse available avatars\n4. Copy the Avatar ID from the avatar details',
-                'recommended_characteristics': [
-                    'Professional appearance (business casual or medical attire)',
-                    'Warm, approachable demeanor',
-                    'Clear speech and articulation',
-                    'Age: 30-50 years (conveys experience)',
-                    'Gender: Consider diverse representation',
-                ],
-                'suggested_search_terms': ['professional', 'coach', 'therapist', 'healthcare', 'medical', 'instructor'],
-            },
+            'ok': True,
+            'mode': 'heygen',
+            'text': payload.text,
+            'residentId': payload.residentId,
+            'videoUrl': result.get('video_url'),
+            'error': None,
+            'raw': _provider_raw(result.get('raw')),
+            'deprecated': True,
         }
-    except Exception as exc:
-        logger.error(f'Error fetching HeyGen avatars: {exc}', exc_info=True)
-        raise HTTPException(status_code=502, detail=f'Failed to fetch avatars: {exc}')
+    return {
+        'ok': False,
+        'mode': 'fallback',
+        'text': payload.text,
+        'residentId': payload.residentId,
+        'videoUrl': None,
+        'error': result.get('error', 'Unknown error'),
+        'raw': _provider_raw(result.get('raw')),
+        'deprecated': True,
+    }
 
 
 @router.post('/api/liveagent/session/token', response_model=LiveAgentSessionTokenResponse)
 async def create_liveagent_session_token(payload: LiveAgentSessionTokenPayload):
-    """
-    Create a LiveAgent FULL-mode session token for frontend SDK usage.
-
-    Based on LiveAvatar FULL mode:
-    - POST /v1/sessions/token
-    - frontend uses @heygen/liveavatar-web-sdk with returned sessionAccessToken.
-    """
+    settings = get_settings()
     client = LiveAgentClient()
-    settings = client.settings
-
-    avatar_id = payload.avatarId or settings.liveagent_avatar_id or settings.heygen_avatar_id
-    voice_id = payload.voiceId or settings.liveagent_voice_id or settings.heygen_voice_id
-    language = payload.language or settings.liveagent_language or 'en'
-    interactivity = payload.interactivityType or settings.liveagent_interactivity_type or 'PUSH_TO_TALK'
-    is_sandbox = settings.liveagent_is_sandbox if payload.isSandbox is None else payload.isSandbox
+    avatar_id = payload.avatarId or settings.liveavatar_avatar_id or settings.liveagent_avatar_id
+    language = payload.language or settings.liveavatar_language or settings.liveagent_language or 'en'
+    interactivity = payload.interactivityType or settings.liveavatar_interactivity_type or settings.liveagent_interactivity_type or 'PUSH_TO_TALK'
 
     if not avatar_id:
         return {
             'ok': False,
             'mode': 'fallback',
             'residentId': payload.residentId,
-            'error': 'LIVEAGENT_AVATAR_ID (or HEYGEN_AVATAR_ID) not configured',
+            'error': 'LIVEAVATAR_AVATAR_ID not configured',
+            'raw': None,
+        }
+
+    try:
+        uuid.UUID(avatar_id)
+    except ValueError:
+        return {
+            'ok': False,
+            'mode': 'fallback',
+            'residentId': payload.residentId,
+            'error': 'avatarId must be a valid UUID',
             'raw': None,
         }
 
     provider_payload: Dict[str, Any] = {
         'mode': payload.mode or 'FULL',
         'avatar_id': avatar_id,
-        'is_sandbox': bool(is_sandbox),
         'interactivity_type': interactivity,
-        'avatar_persona': {
-            'language': language,
-        },
+        'avatar_persona': {'language': language},
     }
-    if voice_id:
-        provider_payload['avatar_persona']['voice_id'] = voice_id
 
-    try:
-        result = await client.create_session_token(provider_payload)
-        if result.get('ok'):
-            return {
-                'ok': True,
-                'mode': 'liveagent',
-                'residentId': payload.residentId,
-                'sessionAccessToken': result.get('sessionAccessToken'),
-                'sessionId': result.get('sessionId'),
-                'raw': result.get('raw'),
-            }
+    result = await client.create_session_token(provider_payload)
+    if result.get('ok'):
         return {
-            'ok': False,
-            'mode': 'fallback',
+            'ok': True,
+            'mode': 'liveagent',
             'residentId': payload.residentId,
-            'error': str(result.get('error') or 'Failed to create LiveAgent session token'),
-            'raw': result.get('raw'),
+            'sessionAccessToken': result.get('sessionAccessToken'),
+            'sessionId': result.get('sessionId'),
+            'error': None,
+            'raw': _provider_raw(result.get('raw')),
         }
-    except Exception as exc:
-        logger.error(f'LiveAgent session token creation failed: {exc}', exc_info=True)
-        return {
-            'ok': False,
-            'mode': 'fallback',
-            'residentId': payload.residentId,
-            'error': str(exc),
-            'raw': None,
-        }
+    return {
+        'ok': False,
+        'mode': 'fallback',
+        'residentId': payload.residentId,
+        'error': str(result.get('error') or 'Failed to create LiveAgent session token'),
+        'raw': _provider_raw(result.get('raw')),
+    }
 
 
 @router.post('/api/liveagent/session/start', response_model=LiveAgentStartResponse)
 async def start_liveagent_session(payload: LiveAgentStartPayload):
-    """
-    Start a LiveAvatar session.
-    
-    According to LiveAvatar API docs:
-    - POST /v1/sessions/start
-    - Uses session_token from create_session_token as Bearer token
-    - Returns LiveKit connection details
-    """
     client = LiveAgentClient()
-    logger.info('Starting LiveAvatar session')
-    
-    try:
-        result = await client.start_session(payload.sessionToken)
-        if result.get('ok'):
-            return {
-                'ok': True,
-                'sessionId': result.get('session_id'),
-                'livekitUrl': result.get('livekit_url'),
-                'livekitClientToken': result.get('livekit_client_token'),
-                'livekitAgentToken': result.get('livekit_agent_token'),
-                'maxSessionDuration': result.get('max_session_duration'),
-                'wsUrl': result.get('ws_url'),
-                'raw': result.get('raw'),
-            }
+    result = await client.start_session(payload.sessionToken, payload.sessionId)
+    if result.get('ok'):
+        return {
+            'ok': True,
+            'sessionId': result.get('session_id'),
+            'livekitUrl': result.get('livekit_url'),
+            'livekitClientToken': result.get('livekit_client_token'),
+            'livekitAgentToken': result.get('livekit_agent_token'),
+            'maxSessionDuration': result.get('max_session_duration'),
+            'wsUrl': result.get('ws_url'),
+            'error': None,
+            'raw': _provider_raw(result.get('raw')),
+        }
+    return {
+        'ok': False,
+        'error': str(result.get('error') or 'Failed to start LiveAgent session'),
+        'raw': _provider_raw(result.get('raw')),
+    }
+
+
+@router.post('/api/liveagent/session/bootstrap', response_model=LiveAgentBootstrapResponse)
+async def bootstrap_liveagent_session(payload: LiveAgentSessionTokenPayload):
+    token_result = await create_liveagent_session_token(payload)
+    if not token_result.get('ok'):
         return {
             'ok': False,
-            'error': str(result.get('error') or 'Failed to start LiveAgent session'),
-            'raw': result.get('raw'),
+            'residentId': payload.residentId,
+            'error': token_result.get('error'),
+            'raw': token_result.get('raw'),
         }
-    except Exception as exc:
-        logger.error(f'LiveAgent session start failed: {exc}', exc_info=True)
+
+    start_result = await start_liveagent_session(
+        LiveAgentStartPayload(
+            sessionToken=str(token_result.get('sessionAccessToken') or ''),
+            sessionId=token_result.get('sessionId'),
+        )
+    )
+    if not start_result.get('ok'):
         return {
             'ok': False,
-            'error': str(exc),
-            'raw': None,
+            'residentId': payload.residentId,
+            'sessionId': token_result.get('sessionId'),
+            'sessionAccessToken': token_result.get('sessionAccessToken'),
+            'error': start_result.get('error'),
+            'raw': start_result.get('raw'),
         }
+
+    return {
+        'ok': True,
+        'residentId': payload.residentId,
+        'sessionId': start_result.get('sessionId'),
+        'sessionAccessToken': token_result.get('sessionAccessToken'),
+        'livekitUrl': start_result.get('livekitUrl'),
+        'livekitClientToken': start_result.get('livekitClientToken'),
+        'livekitAgentToken': start_result.get('livekitAgentToken'),
+        'maxSessionDuration': start_result.get('maxSessionDuration'),
+        'wsUrl': start_result.get('wsUrl'),
+        'error': None,
+        'raw': start_result.get('raw'),
+    }
 
 
 @router.post('/api/liveagent/session/stop')
@@ -286,45 +308,14 @@ async def stop_liveagent_session(payload: LiveAgentStopPayload):
         raise HTTPException(status_code=502, detail=f'liveagent stop failed: {exc}')
 
 
-@router.post('/api/heygen/speak', response_model=HeyGenSpeakResponse)
-async def heygen_speak(payload: HeyGenSpeakPayload):
-    """
-    Generate HeyGen avatar video from text.
-
-    This endpoint:
-    1. Takes text and optional voice_id
-    2. Calls HeyGen API with proper avatar configuration
-    3. Returns video URL or fallback response
-
-    Response format:
-    - Success: {mode: 'heygen', video_url: '...', text: '...', raw: {...}}
-    - Fallback: {mode: 'fallback', text: '...', error: '...'}
-    """
-    client = HeyGenClient()
-    logger.info(f'HeyGen speak request: text length={len(payload.text)}, residentId={payload.residentId}')
-
-    result = await client.generate_video(payload.text, payload.voiceId)
-
-    # Return in format expected by frontend
-    if result.get('success'):
-        return {
-            'ok': True,
-            'mode': 'heygen',
-            'text': payload.text,
-            'residentId': payload.residentId,
-            'videoUrl': result.get('video_url'),
-            'audioUrl': None,  # Audio URL extraction can be added if needed
-            'providerStatus': None,  # Provider status extraction can be added if needed
-            'raw': result.get('raw', {}),
-        }
-    else:
-        # Fallback mode - frontend will use browser TTS
-        logger.warning(f'HeyGen video generation failed: {result.get("error")}')
-        return {
-            'ok': False,
-            'mode': 'fallback',
-            'text': payload.text,
-            'residentId': payload.residentId,
-            'error': result.get('error', 'Unknown error'),
-            'raw': result.get('raw', {}),
-        }
+@router.post('/api/liveagent/session/event', response_model=LiveAgentSessionEventResponse)
+async def send_liveagent_session_event(payload: LiveAgentSessionEventPayload):
+    client = LiveAgentClient()
+    result = await client.send_full_mode_event(
+        session_token=payload.sessionToken,
+        session_id=payload.sessionId,
+        text=payload.text,
+    )
+    if result.get('ok'):
+        return {'ok': True, 'error': None, 'raw': _provider_raw(result.get('raw'))}
+    return {'ok': False, 'error': str(result.get('error') or 'Failed to send session event'), 'raw': _provider_raw(result.get('raw'))}

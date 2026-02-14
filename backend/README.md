@@ -111,3 +111,8 @@ Expected happy-path fields:
 - `livekitUrl`
 - `livekitClientToken`
 - `maxSessionDuration`
+
+Deprecated endpoints:
+- `/api/integrations/heygen`
+- `/api/heygen/avatars`
+- `/api/heygen/speak`

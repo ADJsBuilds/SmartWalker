@@ -3,6 +3,7 @@ import type {
   ApiErrorShape,
   DocumentDetails,
   HeyGenResponse,
+  LiveAgentSessionEventResponse,
   LiveAgentSessionBootstrapResponse,
   LiveAgentSessionStartResponse,
   LiveAgentSessionTokenResponse,
@@ -156,6 +157,10 @@ export class ApiClient {
     language?: string;
   }): Promise<LiveAgentSessionBootstrapResponse> {
     return this.request('/api/liveagent/session/bootstrap', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  sendLiveAgentSessionEvent(payload: { sessionToken: string; sessionId: string; text: string }): Promise<LiveAgentSessionEventResponse> {
+    return this.request('/api/liveagent/session/event', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 

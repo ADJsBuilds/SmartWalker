@@ -1,4 +1,5 @@
-import { AgentEventsEnum, LiveAvatarSession, SessionEvent, SessionState } from '@heygen/liveavatar-web-sdk';
+import { LocalAudioTrack, Room, RoomEvent, createLocalAudioTrack } from 'livekit-client';
+import type { ApiClient } from './apiClient';
 
 export interface LiveAgentEventHandlers {
   onStatus?: (status: 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error') => void;
@@ -7,33 +8,40 @@ export interface LiveAgentEventHandlers {
 }
 
 export class LiveAgentController {
-  private session: LiveAvatarSession | null = null;
+  private readonly apiClient: ApiClient;
+  private room: Room | null = null;
+  private localAudioTrack: LocalAudioTrack | null = null;
+  private sessionId: string | null = null;
+  private sessionAccessToken: string | null = null;
 
-  async connect(sessionAccessToken: string, mediaElement: HTMLVideoElement, handlers: LiveAgentEventHandlers = {}): Promise<void> {
+  constructor(apiClient: ApiClient) {
+    this.apiClient = apiClient;
+  }
+
+  async connectWithLiveKit(
+    livekitUrl: string,
+    livekitClientToken: string,
+    mediaElement: HTMLVideoElement,
+    handlers: LiveAgentEventHandlers = {},
+    sessionContext?: { sessionId?: string; sessionAccessToken?: string },
+  ): Promise<void> {
     await this.disconnect();
     handlers.onStatus?.('connecting');
 
     try {
-      const session = new LiveAvatarSession(sessionAccessToken, { voiceChat: true });
-
-      session.on(SessionEvent.SESSION_STREAM_READY, () => {
-        try {
-          session.attach(mediaElement);
-        } catch {
-          handlers.onError?.('LiveAgent stream ready but attach failed.');
+      const room = new Room();
+      this.room = room;
+      room.on(RoomEvent.Connected, () => handlers.onStatus?.('connected'));
+      room.on(RoomEvent.Disconnected, () => handlers.onStatus?.('disconnected'));
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === 'video') {
+          track.attach(mediaElement);
         }
       });
-      session.on(SessionEvent.SESSION_STATE_CHANGED, (state) => {
-        if (state === SessionState.CONNECTED) handlers.onStatus?.('connected');
-        else if (state === SessionState.DISCONNECTED) handlers.onStatus?.('disconnected');
-      });
-      session.on(SessionEvent.SESSION_DISCONNECTED, () => handlers.onStatus?.('disconnected'));
-
-      session.on(AgentEventsEnum.USER_TRANSCRIPTION, (event) => handlers.onAgentTranscript?.(event.text, 'user'));
-      session.on(AgentEventsEnum.AVATAR_TRANSCRIPTION, (event) => handlers.onAgentTranscript?.(event.text, 'avatar'));
-
-      await session.start();
-      this.session = session;
+      room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
+      await room.connect(livekitUrl, livekitClientToken);
+      this.sessionId = sessionContext?.sessionId || null;
+      this.sessionAccessToken = sessionContext?.sessionAccessToken || null;
       handlers.onStatus?.('connected');
     } catch (error) {
       handlers.onStatus?.('error');
@@ -43,39 +51,68 @@ export class LiveAgentController {
   }
 
   async disconnect(): Promise<void> {
-    if (!this.session) return;
+    if (!this.room) return;
     try {
-      await this.session.stop();
+      if (this.localAudioTrack) {
+        await this.localAudioTrack.stop();
+        this.localAudioTrack = null;
+      }
+      await this.room.disconnect();
     } catch {
-      // Best-effort cleanup; session may already be terminated server-side.
+      // Best-effort cleanup.
     } finally {
-      this.session = null;
+      this.room = null;
+      this.sessionId = null;
+      this.sessionAccessToken = null;
     }
   }
 
   get isConnected(): boolean {
-    return this.session?.state === SessionState.CONNECTED;
+    return Boolean(this.room);
   }
 
-  speakText(text: string): void {
-    if (!this.session || !text.trim()) return;
-    this.session.repeat(text.trim());
+  async speakText(text: string): Promise<boolean> {
+    if (!this.isConnected || !this.sessionId || !this.sessionAccessToken || !text.trim()) return false;
+    try {
+      const result = await this.apiClient.sendLiveAgentSessionEvent({
+        sessionToken: this.sessionAccessToken,
+        sessionId: this.sessionId,
+        text: text.trim(),
+      });
+      return Boolean(result.ok);
+    } catch {
+      return false;
+    }
   }
 
   askAndRespond(userPrompt: string): void {
-    if (!this.session || !userPrompt.trim()) return;
-    this.session.message(userPrompt.trim());
+    void userPrompt;
   }
 
   startListening(): void {
-    this.session?.startListening();
+    void this.startListeningAsync();
   }
 
   stopListening(): void {
-    this.session?.stopListening();
+    void this.stopListeningAsync();
   }
 
   interrupt(): void {
-    this.session?.interrupt();
+    void 0;
+  }
+
+  private async startListeningAsync(): Promise<void> {
+    if (!this.room) return;
+    if (!this.localAudioTrack) {
+      this.localAudioTrack = await createLocalAudioTrack();
+      await this.room.localParticipant.publishTrack(this.localAudioTrack);
+      return;
+    }
+    await this.localAudioTrack.unmute();
+  }
+
+  private async stopListeningAsync(): Promise<void> {
+    if (!this.localAudioTrack) return;
+    await this.localAudioTrack.mute();
   }
 }

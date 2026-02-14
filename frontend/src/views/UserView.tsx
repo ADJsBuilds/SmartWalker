@@ -1,168 +1,148 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { LocalAudioTrack, Room, RoomEvent, Track, createLocalAudioTrack } from 'livekit-client';
 import { useRealtimeState } from '../store/realtimeState';
-import { getSpeechRecognitionCtor } from '../lib/speech';
-import type { SpeechRecognitionLike } from '../lib/speech';
 
-function extractPlayableUrl(response: unknown): string | null {
-  if (!response || typeof response !== 'object') return null;
-  const obj = response as Record<string, unknown>;
-  
-  // New format: direct video_url or url fields
-  if (typeof obj.videoUrl === 'string') return obj.videoUrl;
-  if (typeof obj.video_url === 'string') return obj.video_url;
-  if (typeof obj.url === 'string') return obj.url;
-  
-  // Legacy format: nested in raw
-  if (obj.raw && typeof obj.raw === 'object') {
-    const nested = obj.raw as Record<string, unknown>;
-    if (typeof nested.url === 'string') return nested.url;
-    if (typeof nested.videoUrl === 'string') return nested.videoUrl;
-    if (typeof nested.video_url === 'string') return nested.video_url;
-    if (typeof nested.download_url === 'string') return nested.download_url;
-    
-    // Check nested data object
-    if (nested.data && typeof nested.data === 'object') {
-      const data = nested.data as Record<string, unknown>;
-      if (typeof data.url === 'string') return data.url;
-      if (typeof data.video_url === 'string') return data.video_url;
-      if (typeof data.download_url === 'string') return data.download_url;
-    }
-  }
-  
-  return null;
+type ConnectStatus = 'idle' | 'bootstrapping' | 'connecting' | 'connected' | 'reconnecting' | 'error' | 'disconnected';
+
+function isUnauthorizedTokenError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes('401') || message.includes('unauthorized') || message.includes('invalid token');
 }
 
 export function UserView() {
   const { apiClient, activeResidentId } = useRealtimeState();
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [isListening, setIsListening] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const [status, setStatus] = useState<ConnectStatus>('idle');
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [isTalking, setIsTalking] = useState(false);
+  const roomRef = useRef<Room | null>(null);
+  const audioTrackRef = useRef<LocalAudioTrack | null>(null);
+  const videoHostRef = useRef<HTMLDivElement | null>(null);
 
-  const startListening = () => {
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor) {
-      alert('Speech recognition is not supported in your browser.');
+  const clearVideo = () => {
+    if (videoHostRef.current) videoHostRef.current.innerHTML = '';
+  };
+
+  const disconnect = async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    room.removeAllListeners();
+    await room.disconnect();
+    roomRef.current = null;
+    clearVideo();
+    setStatus('disconnected');
+  };
+
+  const connect = async (retryOn401 = true) => {
+    setStatus('bootstrapping');
+    setErrorText(null);
+    const bootstrap = await apiClient.bootstrapLiveAgentSession({
+      residentId: activeResidentId,
+      mode: 'FULL',
+      interactivityType: 'PUSH_TO_TALK',
+      language: 'en',
+    });
+    if (!bootstrap.ok || !bootstrap.livekitUrl || !bootstrap.livekitClientToken) {
+      setStatus('error');
+      setErrorText(bootstrap.error || 'Failed to bootstrap LiveAvatar session.');
       return;
     }
 
-    const rec = new Ctor();
-    recognitionRef.current = rec;
-    rec.lang = 'en-US';
-    rec.continuous = false;
-    rec.interimResults = false;
-    
-    rec.onresult = async (event) => {
-      const transcript = event.results[0]?.[0]?.transcript || '';
-      setIsListening(false);
-      
-      if (!transcript.trim()) return;
-      
-      // Process the user's question
-      setIsProcessing(true);
-      setVideoUrl(null);
-      
-      try {
-        // Send to agent API
-        const agentResponse = await apiClient.askAgent({
-          residentId: activeResidentId,
-          question: transcript,
-        });
-        
-        // Get the text to speak from agent response
-        const textToSpeak = agentResponse.heygen?.textToSpeak || agentResponse.answer;
-        
-        // Generate HeyGen video
-        const heygenResponse = await apiClient.heygenSpeak({
-          text: textToSpeak,
-          residentId: activeResidentId,
-        });
-        
-        const url = extractPlayableUrl(heygenResponse);
-        if (url) {
-          setVideoUrl(url);
-        } else {
-          alert('Failed to get video URL. Please try again.');
-        }
-      } catch (error) {
-        console.error('Error processing speech:', error);
-        alert('An error occurred. Please try again.');
-      } finally {
-        setIsProcessing(false);
+    const room = new Room();
+    roomRef.current = room;
+    room.on(RoomEvent.Connected, () => setStatus('connected'));
+    room.on(RoomEvent.Reconnecting, () => setStatus('reconnecting'));
+    room.on(RoomEvent.Reconnected, () => setStatus('connected'));
+    room.on(RoomEvent.Disconnected, () => setStatus('disconnected'));
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      if (!videoHostRef.current) return;
+      const el = track.attach();
+      if (track.kind === Track.Kind.Video) el.className = 'h-full w-full rounded-xl object-cover';
+      if (track.kind === Track.Kind.Audio) el.className = 'hidden';
+      videoHostRef.current.appendChild(el);
+    });
+    room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
+
+    try {
+      setStatus('connecting');
+      await room.connect(bootstrap.livekitUrl, bootstrap.livekitClientToken);
+    } catch (error) {
+      await disconnect();
+      if (retryOn401 && isUnauthorizedTokenError(error)) {
+        await connect(false);
+        return;
       }
-    };
-    
-    rec.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-      setIsListening(false);
-      if (event.error === 'not-allowed') {
-        alert('Microphone permission denied. Please allow microphone access.');
-      } else {
-        alert('Speech recognition error. Please try again.');
-      }
-    };
-    
-    rec.onend = () => {
-      setIsListening(false);
-    };
-    
-    setIsListening(true);
-    rec.start();
+      setStatus('error');
+      setErrorText(error instanceof Error ? error.message : 'Unable to connect to LiveKit.');
+    }
   };
 
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
+  const startTalking = async () => {
+    setIsTalking(true);
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      if (!audioTrackRef.current) {
+        const track = await createLocalAudioTrack();
+        audioTrackRef.current = track;
+        await room.localParticipant.publishTrack(track);
+      } else {
+        await audioTrackRef.current.unmute();
+      }
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Unable to enable microphone.');
+      setStatus('error');
     }
-    setIsListening(false);
   };
+
+  const stopTalking = async () => {
+    setIsTalking(false);
+    if (!audioTrackRef.current) return;
+    await audioTrackRef.current.mute();
+  };
+
+  useEffect(() => {
+    connect(true);
+    return () => {
+      const cleanup = async () => {
+        if (audioTrackRef.current) {
+          await audioTrackRef.current.stop();
+          audioTrackRef.current = null;
+        }
+        await disconnect();
+      };
+      void cleanup();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-black">
-      {/* Large video area - takes up almost all of the screen */}
-      <div className="flex-1 flex items-center justify-center p-4">
-        {videoUrl ? (
-          <video
-            src={videoUrl}
-            controls
-            autoPlay
-            className="w-full h-full object-contain rounded-lg"
-            onEnded={() => setVideoUrl(null)}
-          />
-        ) : (
-          <div className="flex items-center justify-center w-full h-full bg-slate-900 rounded-lg">
-            {isProcessing ? (
-              <div className="text-white text-xl">Processing your question...</div>
-            ) : (
-              <div className="text-slate-400 text-lg">Ready to talk</div>
-            )}
-          </div>
-        )}
-      </div>
+    <main className="fixed inset-0 flex flex-col bg-black text-white">
+      <section className="relative flex-1 p-4 sm:p-6">
+        <div ref={videoHostRef} className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-slate-900">
+          <p className="text-sm text-slate-300">
+            {status === 'connected' ? 'Connected. Waiting for avatar stream...' : `Status: ${status}`}
+          </p>
+        </div>
+        {errorText ? <p className="absolute left-8 right-8 top-8 rounded-md bg-rose-800/80 px-3 py-2 text-sm">{errorText}</p> : null}
+      </section>
 
-      {/* Orange "press to talk" button at the bottom */}
-      <div className="p-6 flex justify-center">
+      <section className="flex justify-center px-6 pb-8 pt-2">
         <button
           type="button"
-          onClick={isListening ? stopListening : startListening}
-          disabled={isProcessing}
-          className={`
-            px-12 py-6 text-2xl font-bold text-white rounded-full
-            transition-all duration-200
-            ${isListening 
-              ? 'bg-red-600 hover:bg-red-700 active:bg-red-800' 
-              : 'bg-orange-500 hover:bg-orange-600 active:bg-orange-700'
-            }
-            ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-            shadow-lg hover:shadow-xl active:shadow-md
-            transform hover:scale-105 active:scale-95
-          `}
+          onMouseDown={() => void startTalking()}
+          onMouseUp={() => void stopTalking()}
+          onMouseLeave={() => void stopTalking()}
+          onTouchStart={() => void startTalking()}
+          onTouchEnd={() => void stopTalking()}
+          className={`w-full max-w-sm rounded-full px-8 py-6 text-2xl font-black shadow-xl transition ${
+            isTalking ? 'bg-orange-700' : 'bg-orange-500'
+          }`}
         >
-          {isListening ? 'Listening...' : isProcessing ? 'Processing...' : 'Press to Talk'}
+          {isTalking ? 'Talking...' : 'Press to Talk'}
         </button>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
 

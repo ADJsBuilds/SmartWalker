@@ -107,6 +107,12 @@ export interface LiveAgentSessionBootstrapResponse {
   raw?: Record<string, unknown> | null;
 }
 
+export interface LiveAgentSessionEventResponse {
+  ok: boolean;
+  error?: string;
+  raw?: Record<string, unknown> | null;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;
