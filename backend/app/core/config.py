@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     openevidence_api_key: str = ''
     openevidence_base_url: str = ''
     gemini_api_key: str = ''
-    gemini_model: str = 'gemini-1.5-flash'
+    gemini_enabled: bool = False
+    gemini_model: str = 'gemini-3-flash'
     gemini_base_url: str = 'https://generativelanguage.googleapis.com/v1beta'
     coach_script_cooldown_seconds: int = 8
     heygen_base_url: str = ''

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DailyReport, MetricSample
 from app.db.session import get_db
+from app.services.gemini_client import GeminiClient, build_deterministic_narrative
 from app.services.report_pdf import build_daily_pdf
 from app.services.storage import resident_report_path
 
@@ -35,13 +36,22 @@ def generate_daily_report(residentId: str, date: str, db: Session = Depends(get_
     step_var_values = []
     fall_count = 0
     tilt_spikes = 0
+    has_walker = False
+    has_vision = False
 
     for s in samples:
-        merged = json.loads(s.merged_json or '{}')
+        try:
+            merged = json.loads(s.merged_json or '{}')
+        except Exception:
+            merged = {}
         metrics = merged.get('metrics') or {}
         if isinstance(metrics.get('steps'), (int, float)):
             steps_values.append(metrics['steps'])
+        if merged.get('walker'):
+            has_walker = True
         vision = merged.get('vision') or {}
+        if vision:
+            has_vision = True
         if isinstance(vision.get('cadenceSpm'), (int, float)):
             cadence_values.append(vision['cadenceSpm'])
         if isinstance(vision.get('stepVar'), (int, float)):
@@ -73,13 +83,52 @@ def generate_daily_report(residentId: str, date: str, db: Session = Depends(get_
         'Review walker height/fit and reinforcement cues for posture.',
     ]
 
+    report_input = {
+        'residentId': residentId,
+        'date': date,
+        'samples': stats['samples'],
+        'steps': stats['steps'],
+        'cadenceSpm_avg': stats['cadenceSpm_avg'],
+        'stepVar_avg': stats['stepVar_avg'],
+        'fallSuspected_count': stats['fallSuspected_count'],
+        'tilt_spikes': stats['tilt_spikes'],
+        'hasVision': has_vision,
+        'hasWalker': has_walker,
+        'deterministic': {
+            'struggles': struggles,
+            'suggestions': suggestions,
+        },
+    }
+
+    deterministic_narrative = build_deterministic_narrative(
+        resident_id=residentId,
+        date_str=date,
+        stats=stats,
+        struggles=struggles,
+        suggestions=suggestions,
+        has_walker=has_walker,
+        has_vision=has_vision,
+    )
+    llm_narrative = GeminiClient().generate_report_narrative(report_input)
+    final_narrative = llm_narrative or deterministic_narrative
+    narrative_source = 'gemini' if llm_narrative else 'deterministic_fallback'
+
     out_path = resident_report_path(residentId, date)
-    build_daily_pdf(out_path, residentId, date, stats, struggles, suggestions)
+    build_daily_pdf(out_path, residentId, date, stats, struggles, suggestions, final_narrative.model_dump())
+
+    summary_payload = {
+        'stats': stats,
+        'struggles': struggles,
+        'suggestions': suggestions,
+        'reportInput': report_input,
+        'narrativeSource': narrative_source,
+        'narrative': final_narrative.model_dump(),
+    }
 
     existing = db.query(DailyReport).filter(DailyReport.resident_id == residentId, DailyReport.date == target_date).first()
     if existing:
         existing.pdf_path = out_path
-        existing.summary_json = json.dumps({'stats': stats, 'struggles': struggles, 'suggestions': suggestions})
+        existing.summary_json = json.dumps(summary_payload)
         db.commit()
         db.refresh(existing)
         report = existing
@@ -88,7 +137,7 @@ def generate_daily_report(residentId: str, date: str, db: Session = Depends(get_
             resident_id=residentId,
             date=target_date,
             pdf_path=out_path,
-            summary_json=json.dumps({'stats': stats, 'struggles': struggles, 'suggestions': suggestions}),
+            summary_json=json.dumps(summary_payload),
         )
         db.add(report)
         db.commit()

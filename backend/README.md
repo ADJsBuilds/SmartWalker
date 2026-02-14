@@ -58,8 +58,9 @@ Set environment variables in Render dashboard:
 - `INCLUDE_PROVIDER_RAW` (optional, default: `false`; include provider raw payloads in API responses)
 - `OPENEVIDENCE_API_KEY`
 - `OPENEVIDENCE_BASE_URL`
-- `GEMINI_API_KEY` (optional; enables therapist-style script polish)
-- `GEMINI_MODEL` (optional, default: `gemini-1.5-flash`)
+- `GEMINI_API_KEY` (optional; required for Gemini-backed narrative/script generation)
+- `GEMINI_ENABLED` (optional, default: `false`; set `true` to enable Gemini calls)
+- `GEMINI_MODEL` (optional, default: `gemini-3-flash`)
 - `GEMINI_BASE_URL` (optional, default: `https://generativelanguage.googleapis.com/v1beta`)
 - `COACH_SCRIPT_COOLDOWN_SECONDS` (optional, default: `8`)
 
