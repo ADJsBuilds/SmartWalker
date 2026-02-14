@@ -83,6 +83,30 @@ export interface LiveAgentSessionTokenResponse {
   raw?: Record<string, unknown> | null;
 }
 
+export interface LiveAgentSessionStartResponse {
+  ok: boolean;
+  sessionId?: string;
+  livekitUrl?: string;
+  livekitClientToken?: string;
+  maxSessionDuration?: number;
+  wsUrl?: string | null;
+  error?: string;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface LiveAgentSessionBootstrapResponse {
+  ok: boolean;
+  residentId?: string;
+  sessionId?: string;
+  sessionAccessToken?: string;
+  livekitUrl?: string;
+  livekitClientToken?: string;
+  maxSessionDuration?: number;
+  wsUrl?: string | null;
+  error?: string;
+  raw?: Record<string, unknown> | null;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;

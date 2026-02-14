@@ -3,6 +3,8 @@ import type {
   ApiErrorShape,
   DocumentDetails,
   HeyGenResponse,
+  LiveAgentSessionBootstrapResponse,
+  LiveAgentSessionStartResponse,
   LiveAgentSessionTokenResponse,
   MergedState,
   Resident,
@@ -135,12 +137,25 @@ export class ApiClient {
   createLiveAgentSessionToken(payload: {
     residentId?: string;
     avatarId?: string;
-    interactivityType?: 'CONVERSATIONAL' | 'PUSH_TO_TALK';
+    mode?: 'FULL';
+    interactivityType?: 'PUSH_TO_TALK';
     language?: string;
-    voiceId?: string;
-    isSandbox?: boolean;
   }): Promise<LiveAgentSessionTokenResponse> {
     return this.request('/api/liveagent/session/token', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  startLiveAgentSession(payload: { sessionToken: string; sessionId?: string }): Promise<LiveAgentSessionStartResponse> {
+    return this.request('/api/liveagent/session/start', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  bootstrapLiveAgentSession(payload: {
+    residentId?: string;
+    mode?: 'FULL';
+    avatarId?: string;
+    interactivityType?: 'PUSH_TO_TALK';
+    language?: string;
+  }): Promise<LiveAgentSessionBootstrapResponse> {
+    return this.request('/api/liveagent/session/bootstrap', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 

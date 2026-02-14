@@ -38,13 +38,16 @@ Default fallback: `http://localhost:8000`
 
 - `/` Grandma View by default, Proof View one tap away
 - `/cv` standalone CV window (independent websocket)
+- `/liveavatar-test` LiveAvatar bootstrap + LiveKit connection test page
 
-## Resilience and Fallbacks
+## LiveAvatar Test Page
 
-- Missing endpoints (`404/405/501`) show **Not implemented yet** notices.
-- HeyGen failures fallback to browser `SpeechSynthesis`.
-- Agent failures fallback to local manual response text.
-- If backend is unreachable, app enters mock-data mode to remain demoable.
+`/liveavatar-test` performs:
+1) `POST /api/liveagent/session/bootstrap`
+2) connect with `livekit-client` using `livekitUrl` + `livekitClientToken`
+3) render subscribed tracks and show status/events
+
+If a connect attempt fails with token auth errors (`401`/invalid token), the page automatically retries bootstrap once and reconnects.
 
 ## Demo Layout
 

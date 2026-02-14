@@ -50,19 +50,64 @@ Set environment variables in Render dashboard:
 - `STORAGE_DIR`
 - `CORS_ALLOW_ORIGINS`
 - `LOG_LEVEL`
-- `HEYGEN_API_KEY` (required for HeyGen)
-- `HEYGEN_BASE_URL` (e.g., `https://api.heygen.com/v1/video/generate`)
-- `HEYGEN_AVATAR_ID` (required - your HeyGen avatar ID)
-- `HEYGEN_VOICE_ID` (optional - specific voice, otherwise uses avatar default)
-- `HEYGEN_MODE` (optional - `video` or `streaming`, default: `video`)
-- `LIVEAGENT_API_KEY` (preferred for LiveAgent, falls back to `HEYGEN_API_KEY`)
-- `LIVEAGENT_BASE_URL` (default: `https://api.liveavatar.com`)
-- `LIVEAGENT_AVATAR_ID` (required for `/api/liveagent/session/token`)
-- `LIVEAGENT_VOICE_ID` (optional)
-- `LIVEAGENT_LANGUAGE` (optional, default: `en`)
-- `LIVEAGENT_INTERACTIVITY_TYPE` (optional: `PUSH_TO_TALK` or `CONVERSATIONAL`)
-- `LIVEAGENT_IS_SANDBOX` (optional: `true`/`false`)
+- `LIVEAVATAR_API_KEY` (required UUID developer key for LiveAvatar provider calls)
+- `LIVEAVATAR_BASE_URL` (default: `https://api.liveavatar.com`)
+- `LIVEAVATAR_AVATAR_ID` (required if not passed in request payload)
+- `LIVEAVATAR_LANGUAGE` (optional, default: `en`)
+- `LIVEAVATAR_INTERACTIVITY_TYPE` (optional, default: `PUSH_TO_TALK`)
+- `INCLUDE_PROVIDER_RAW` (optional, default: `false`; include provider raw payloads in API responses)
 - `OPENEVIDENCE_API_KEY`
 - `OPENEVIDENCE_BASE_URL`
 
-See `HEYGEN_SETUP.md` for detailed HeyGen configuration instructions.
+## LiveAvatar API (Current Flow)
+
+The backend follows the strict sequence:
+1) `POST /v1/sessions/token` with `X-API-KEY`
+2) `POST /v1/sessions/start` with `X-API-KEY` + `Authorization: Bearer <session_token>`
+3) return clean payload to frontend (`livekitUrl`, `livekitClientToken`, `sessionId`)
+
+### Curl: `/api/liveagent/session/token`
+
+```bash
+curl -X POST http://localhost:8000/api/liveagent/session/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "residentId": "r1",
+    "mode": "FULL",
+    "avatarId": "9a4f4b1f-86f9-4acf-9a37-b81c21ae95e4",
+    "interactivityType": "PUSH_TO_TALK",
+    "language": "en"
+  }'
+```
+
+### Curl: `/api/liveagent/session/start`
+
+```bash
+curl -X POST http://localhost:8000/api/liveagent/session/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionToken": "<session_token_from_previous_call>",
+    "sessionId": "<session_id_from_previous_call>"
+  }'
+```
+
+### Curl: `/api/liveagent/session/bootstrap`
+
+```bash
+curl -X POST http://localhost:8000/api/liveagent/session/bootstrap \
+  -H "Content-Type: application/json" \
+  -d '{
+    "residentId": "r1",
+    "mode": "FULL",
+    "avatarId": "9a4f4b1f-86f9-4acf-9a37-b81c21ae95e4",
+    "interactivityType": "PUSH_TO_TALK",
+    "language": "en"
+  }'
+```
+
+Expected happy-path fields:
+- `ok: true`
+- `sessionId`
+- `livekitUrl`
+- `livekitClientToken`
+- `maxSessionDuration`
