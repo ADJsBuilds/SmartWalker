@@ -7,14 +7,17 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db.models import MetricSample, Resident
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.services.merge_state import compute_merged, merged_state, now_ts, vision_state, walker_state
+from app.services.analytics_store import persist_analytics_tick
 from app.routers.ws import manager
 
 router = APIRouter(tags=['ingest'])
 
 _LAST_PERSIST: Dict[str, int] = {}
-_PERSIST_INTERVAL_SECONDS = 5
+_LAST_ANALYTICS_PERSIST: Dict[str, int] = {}
+_SAMPLE_COUNTER: Dict[str, int] = {}
 
 
 class WalkerPacket(BaseModel):
@@ -62,27 +65,52 @@ class VisionPacket(BaseModel):
 
 
 async def _update_and_push(resident_id: str, db: Session) -> None:
+    settings = get_settings()
+    persist_interval_seconds = max(1, int(settings.ingest_persist_interval_seconds or 5))
+    full_payload_every = max(1, int(settings.ingest_store_full_payload_every_n_samples or 3))
+    analytics_interval_seconds = max(1, persist_interval_seconds // 2)
+
     merged = compute_merged(resident_id)
     merged_state[resident_id] = merged
     event = {'type': 'merged_update', 'data': merged}
     await manager.broadcast_all(event)
     await manager.broadcast_resident(resident_id, event)
 
-    now = int(time.time())
-    if now - _LAST_PERSIST.get(resident_id, 0) < _PERSIST_INTERVAL_SECONDS:
-        return
-    _LAST_PERSIST[resident_id] = now
-
     if not db.get(Resident, resident_id):
         db.add(Resident(id=resident_id, name=None))
+
+    now = int(time.time())
+    metrics = merged.get('metrics') or {}
+    tilt_deg = metrics.get('tiltDeg')
+    critical = bool(metrics.get('fallSuspected')) or (isinstance(tilt_deg, (int, float)) and float(tilt_deg) >= 50)
+
+    if critical or now - _LAST_ANALYTICS_PERSIST.get(resident_id, 0) >= analytics_interval_seconds:
+        _LAST_ANALYTICS_PERSIST[resident_id] = now
+        persist_analytics_tick(
+            db,
+            resident_id,
+            merged,
+            persist_interval_seconds=analytics_interval_seconds,
+        )
+    if now - _LAST_PERSIST.get(resident_id, 0) < persist_interval_seconds:
+        db.commit()
+        return
+
+    _LAST_PERSIST[resident_id] = now
+    _SAMPLE_COUNTER[resident_id] = _SAMPLE_COUNTER.get(resident_id, 0) + 1
+    keep_full_payload = (_SAMPLE_COUNTER[resident_id] % full_payload_every) == 0
+
+    walker_payload = walker_state.get(resident_id) or {}
+    vision_payload = vision_state.get(resident_id) or {}
+    merged_payload = merged if keep_full_payload else {'residentId': resident_id, 'ts': merged.get('ts'), 'metrics': metrics}
 
     db.add(
         MetricSample(
             resident_id=resident_id,
-            ts=merged['ts'],
-            walker_json=json.dumps(walker_state.get(resident_id) or {}),
-            vision_json=json.dumps(vision_state.get(resident_id) or {}),
-            merged_json=json.dumps(merged),
+            ts=int(merged.get('ts') or now),
+            walker_json=json.dumps(walker_payload if keep_full_payload else {}),
+            vision_json=json.dumps(vision_payload if keep_full_payload else {}),
+            merged_json=json.dumps(merged_payload),
         )
     )
     db.commit()

@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     liveavatar_language: str = 'en'
     liveavatar_interactivity_type: str = 'PUSH_TO_TALK'
     include_provider_raw: bool = False
+    ingest_persist_interval_seconds: int = 5
+    ingest_store_full_payload_every_n_samples: int = 3
     cors_allow_origins: List[str] = ['*']
     log_level: str = 'INFO'
 
