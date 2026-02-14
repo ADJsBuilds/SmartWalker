@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.services.coach_script import CoachScriptService
 from app.services.openevidence import OpenEvidenceClient, normalize_openevidence
 from app.services.retrieval import retrieve_top_chunks
 
@@ -15,6 +16,22 @@ class AgentAskPayload(BaseModel):
     residentId: str
     question: str
     conversationId: Optional[str] = None
+
+
+class CoachScriptPayload(BaseModel):
+    residentId: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    goal: Literal['encourage', 'correct_posture', 'safety_warning', 'answer_question'] = 'encourage'
+    tone: Literal['calm', 'energetic'] = 'calm'
+    userPrompt: Optional[str] = None
+
+
+class CoachScriptResponse(BaseModel):
+    script: str
+    intent: str
+    safetyFlags: list[str]
+    meta: Dict[str, Any]
+    reason: str
 
 
 @router.post('/api/agent/ask')
@@ -45,3 +62,15 @@ async def ask_agent(payload: AgentAskPayload, db: Session = Depends(get_db)):
         'contextUsed': context,
         'heygen': {'textToSpeak': answer[:240]},
     }
+
+
+@router.post('/api/coach/script', response_model=CoachScriptResponse)
+async def build_coach_script(payload: CoachScriptPayload):
+    result = await CoachScriptService().generate_script(
+        resident_id=payload.residentId,
+        context=payload.context,
+        goal=payload.goal,
+        tone=payload.tone,
+        user_prompt=payload.userPrompt,
+    )
+    return result

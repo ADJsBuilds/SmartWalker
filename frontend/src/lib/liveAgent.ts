@@ -36,6 +36,17 @@ export class LiveAgentController {
       room.on(RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === 'video') {
           track.attach(mediaElement);
+          return;
+        }
+        if (track.kind === 'audio') {
+          // Attach remote audio so avatar voice is audible in Judge mode.
+          const audioEl = track.attach() as HTMLAudioElement;
+          audioEl.autoplay = true;
+          audioEl.playsInline = true;
+          audioEl.muted = false;
+          audioEl.style.display = 'none';
+          const host = mediaElement.parentElement ?? document.body;
+          host.appendChild(audioEl);
         }
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));

@@ -1,6 +1,8 @@
 import type {
   AgentAskResponse,
   ApiErrorShape,
+  CoachScriptRequest,
+  CoachScriptResponse,
   DocumentDetails,
   HeyGenResponse,
   LiveAgentSessionEventResponse,
@@ -129,6 +131,10 @@ export class ApiClient {
 
   askAgent(payload: { residentId: string; question: string; conversationId?: string }): Promise<AgentAskResponse> {
     return this.request('/api/agent/ask', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  generateCoachScript(payload: CoachScriptRequest): Promise<CoachScriptResponse> {
+    return this.request('/api/coach/script', { method: 'POST', body: JSON.stringify(payload) });
   }
 
   heygenSpeak(payload: { text: string; residentId?: string }): Promise<HeyGenResponse> {

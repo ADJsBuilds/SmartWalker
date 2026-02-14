@@ -80,9 +80,35 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   };
 
   const playCoach = async (text: string) => {
-    const usedLiveAvatar = await liveAgentRef.current?.speakText(text);
+    const cadence = Number(vision.cadenceSpm);
+    const desiredGoal = fall ? 'safety_warning' : Number(metrics.tiltDeg || 0) > 20 ? 'correct_posture' : 'encourage';
+    let coachScript = text.trim();
+    try {
+      const generated = await apiClient.generateCoachScript({
+        residentId: activeResidentId,
+        goal: desiredGoal,
+        tone: fall ? 'calm' : 'energetic',
+        userPrompt: text.trim() || undefined,
+        context: {
+          steps: Number(metrics.steps || 0),
+          tiltDeg: Number(metrics.tiltDeg || 0),
+          balance: Number(metrics.balance || 0),
+          cadence: Number.isFinite(cadence) ? cadence : undefined,
+          fallSuspected: fall,
+          sessionPhase: isExercising ? 'walking' : 'idle',
+        },
+      });
+      if (generated.script?.trim()) {
+        coachScript = generated.script.trim();
+        setCoachText(generated.script.trim());
+      }
+    } catch {
+      // Keep manual text as fallback if script generation fails.
+    }
+
+    const usedLiveAvatar = await liveAgentRef.current?.speakText(coachScript);
     if (usedLiveAvatar) return;
-    speakText(text);
+    speakText(coachScript);
     if (!liveAgentRef.current?.isConnected || !usedLiveAvatar) {
       notify('LiveAgent not connected. Used browser voice fallback.', 'warn');
     }
@@ -111,19 +137,40 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
     const question = prompt.trim();
     if (!question) return;
     try {
-      const response = await apiClient.askAgent({ residentId: activeResidentId, question });
-      setAgentResponse(response);
-      const speakable = response.heygen?.textToSpeak || response.answer;
+      const generated = await apiClient.generateCoachScript({
+        residentId: activeResidentId,
+        goal: 'answer_question',
+        tone: 'calm',
+        userPrompt: question,
+        context: {
+          steps: Number(metrics.steps || 0),
+          tiltDeg: Number(metrics.tiltDeg || 0),
+          balance: Number(metrics.balance || 0),
+          cadence: Number(vision.cadenceSpm || 0),
+          fallSuspected: fall,
+          sessionPhase: isExercising ? 'walking' : 'idle',
+        },
+      });
+      const speakable = generated.script || question;
+      setAgentResponse({ answer: speakable, citations: [] });
       const usedLiveAvatar = await liveAgentRef.current?.speakText(speakable);
       if (!usedLiveAvatar) speakText(speakable);
     } catch (error) {
-      const fallback = isNotImplementedError(error)
-        ? { answer: `Coach fallback: ${question}. Keep going safely!`, citations: [] }
-        : { answer: `Temporary fallback response: ${question}`, citations: [] };
-      setAgentResponse(fallback);
-      const usedLiveAvatar = await liveAgentRef.current?.speakText(fallback.answer);
-      if (!usedLiveAvatar) speakText(fallback.answer);
-      notify('Agent endpoint unavailable. Showing fallback response.', 'warn');
+      try {
+        const response = await apiClient.askAgent({ residentId: activeResidentId, question });
+        setAgentResponse(response);
+        const speakable = response.heygen?.textToSpeak || response.answer;
+        const usedLiveAvatar = await liveAgentRef.current?.speakText(speakable);
+        if (!usedLiveAvatar) speakText(speakable);
+      } catch (secondaryError) {
+        const fallback = isNotImplementedError(secondaryError)
+          ? { answer: `Coach fallback: ${question}. Keep going safely!`, citations: [] }
+          : { answer: `Temporary fallback response: ${question}`, citations: [] };
+        setAgentResponse(fallback);
+        const usedLiveAvatar = await liveAgentRef.current?.speakText(fallback.answer);
+        if (!usedLiveAvatar) speakText(fallback.answer);
+        notify('Agent endpoint unavailable. Showing fallback response.', 'warn');
+      }
     }
   };
 

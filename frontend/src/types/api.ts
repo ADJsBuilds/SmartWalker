@@ -113,6 +113,29 @@ export interface LiveAgentSessionEventResponse {
   raw?: Record<string, unknown> | null;
 }
 
+export interface CoachScriptRequest {
+  residentId: string;
+  context: {
+    steps?: number;
+    tiltDeg?: number;
+    balance?: number;
+    cadence?: number;
+    fallSuspected?: boolean;
+    sessionPhase?: 'idle' | 'walking' | 'paused';
+  };
+  goal?: 'encourage' | 'correct_posture' | 'safety_warning' | 'answer_question';
+  tone?: 'calm' | 'energetic';
+  userPrompt?: string;
+}
+
+export interface CoachScriptResponse {
+  script: string;
+  intent: string;
+  safetyFlags: string[];
+  meta: Record<string, unknown>;
+  reason: string;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;

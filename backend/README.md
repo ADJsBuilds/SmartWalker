@@ -58,6 +58,10 @@ Set environment variables in Render dashboard:
 - `INCLUDE_PROVIDER_RAW` (optional, default: `false`; include provider raw payloads in API responses)
 - `OPENEVIDENCE_API_KEY`
 - `OPENEVIDENCE_BASE_URL`
+- `GEMINI_API_KEY` (optional; enables therapist-style script polish)
+- `GEMINI_MODEL` (optional, default: `gemini-1.5-flash`)
+- `GEMINI_BASE_URL` (optional, default: `https://generativelanguage.googleapis.com/v1beta`)
+- `COACH_SCRIPT_COOLDOWN_SECONDS` (optional, default: `8`)
 
 ## LiveAvatar API (Current Flow)
 
@@ -116,3 +120,35 @@ Deprecated endpoints:
 - `/api/integrations/heygen`
 - `/api/heygen/avatars`
 - `/api/heygen/speak`
+
+## Coach Script Generator
+
+`POST /api/coach/script` builds short therapist-style speech text for LiveAvatar.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/api/coach/script \
+  -H "Content-Type: application/json" \
+  -d '{
+    "residentId": "r1",
+    "goal": "encourage",
+    "tone": "calm",
+    "userPrompt": "Can we speed up a little?",
+    "context": {
+      "steps": 128,
+      "tiltDeg": 8.5,
+      "balance": 0.12,
+      "cadence": 82,
+      "fallSuspected": false,
+      "sessionPhase": "walking"
+    }
+  }'
+```
+
+Response shape:
+- `script` (max 2 sentences, <= 220 chars)
+- `intent`
+- `safetyFlags`
+- `meta`
+- `reason`
