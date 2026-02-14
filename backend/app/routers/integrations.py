@@ -59,6 +59,22 @@ class LiveAgentSessionTokenResponse(BaseModel):
     raw: Optional[Dict[str, Any]] = None
 
 
+class LiveAgentStartPayload(BaseModel):
+    sessionToken: str
+
+
+class LiveAgentStartResponse(BaseModel):
+    ok: bool
+    sessionId: Optional[str] = None
+    livekitUrl: Optional[str] = None
+    livekitClientToken: Optional[str] = None
+    livekitAgentToken: Optional[str] = None
+    maxSessionDuration: Optional[int] = None
+    wsUrl: Optional[str] = None
+    error: Optional[str] = None
+    raw: Optional[Dict[str, Any]] = None
+
+
 class LiveAgentStopPayload(BaseModel):
     sessionId: str
 
@@ -215,6 +231,46 @@ async def create_liveagent_session_token(payload: LiveAgentSessionTokenPayload):
             'ok': False,
             'mode': 'fallback',
             'residentId': payload.residentId,
+            'error': str(exc),
+            'raw': None,
+        }
+
+
+@router.post('/api/liveagent/session/start', response_model=LiveAgentStartResponse)
+async def start_liveagent_session(payload: LiveAgentStartPayload):
+    """
+    Start a LiveAvatar session.
+    
+    According to LiveAvatar API docs:
+    - POST /v1/sessions/start
+    - Uses session_token from create_session_token as Bearer token
+    - Returns LiveKit connection details
+    """
+    client = LiveAgentClient()
+    logger.info('Starting LiveAvatar session')
+    
+    try:
+        result = await client.start_session(payload.sessionToken)
+        if result.get('ok'):
+            return {
+                'ok': True,
+                'sessionId': result.get('session_id'),
+                'livekitUrl': result.get('livekit_url'),
+                'livekitClientToken': result.get('livekit_client_token'),
+                'livekitAgentToken': result.get('livekit_agent_token'),
+                'maxSessionDuration': result.get('max_session_duration'),
+                'wsUrl': result.get('ws_url'),
+                'raw': result.get('raw'),
+            }
+        return {
+            'ok': False,
+            'error': str(result.get('error') or 'Failed to start LiveAgent session'),
+            'raw': result.get('raw'),
+        }
+    except Exception as exc:
+        logger.error(f'LiveAgent session start failed: {exc}', exc_info=True)
+        return {
+            'ok': False,
             'error': str(exc),
             'raw': None,
         }
