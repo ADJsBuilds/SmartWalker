@@ -19,12 +19,21 @@ class LiveAvatarLiteClient:
     def _api_key(self) -> str:
         return (self.settings.liveavatar_api_key or self.settings.liveagent_api_key or '').strip()
 
+    def _heygen_api_key(self) -> str:
+        return (self.settings.heygen_api_key or '').strip()
+
     def _provider_headers(self) -> Dict[str, str]:
         key = self._api_key()
         headers = {'Content-Type': 'application/json', 'accept': 'application/json'}
         if key:
             headers['X-API-KEY'] = key
         return headers
+
+    def _heygen_lite_new_url(self) -> str:
+        configured = (self.settings.heygen_base_url or '').strip()
+        if configured:
+            return configured
+        return 'https://api.heygen.com/v1/streaming.new'
 
     @staticmethod
     def _session_headers(session_token: str) -> Dict[str, str]:
@@ -84,6 +93,44 @@ class LiveAvatarLiteClient:
             return {'ok': False, 'error': f'Provider token creation failed (code={code})', 'raw': raw}
 
         return {'ok': True, 'session_id': session_id, 'session_token': session_token, 'raw': raw}
+
+    async def create_heygen_lite_session(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        api_key = self._heygen_api_key()
+        if not api_key:
+            return {'ok': False, 'status_code': 500, 'error': 'HEYGEN_API_KEY missing'}
+
+        headers = {
+            'Content-Type': 'application/json',
+            'accept': 'application/json',
+            'X-Api-Key': api_key,
+        }
+        url = self._heygen_lite_new_url()
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+                response = await client.post(url, json=payload, headers=headers)
+        except httpx.RequestError as exc:
+            logger.error('HeyGen lite/new request failed: %s', exc)
+            return {'ok': False, 'status_code': 502, 'error': 'HeyGen request failed', 'detail': str(exc)}
+
+        body_text = response.text or ''
+        body_json: Optional[Any] = None
+        json_parsed = False
+        if body_text:
+            try:
+                body_json = response.json()
+                json_parsed = True
+            except ValueError:
+                json_parsed = False
+
+        logger.info('HeyGen lite/new status=%s json_parsed=%s', response.status_code, json_parsed)
+        return {
+            'ok': response.status_code < 400,
+            'status_code': response.status_code,
+            'json_parsed': json_parsed,
+            'body_json': body_json,
+            'body_text': body_text,
+        }
 
     async def start_session(self, *, session_token: str) -> Dict[str, Any]:
         url = f'{self._base_url()}/v1/sessions/start'

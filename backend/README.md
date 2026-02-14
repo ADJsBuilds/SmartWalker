@@ -55,6 +55,8 @@ Set environment variables in Render dashboard:
 - `LIVEAVATAR_AVATAR_ID` (required if not passed in request payload)
 - `LIVEAVATAR_LANGUAGE` (optional, default: `en`)
 - `LIVEAVATAR_INTERACTIVITY_TYPE` (optional, default: `PUSH_TO_TALK`)
+- `HEYGEN_API_KEY` (required for `POST /api/liveavatar/lite/new`)
+- `HEYGEN_BASE_URL` (optional; defaults to `https://api.heygen.com/v1/streaming.new`)
 - `INCLUDE_PROVIDER_RAW` (optional, default: `false`; include provider raw payloads in API responses)
 - `OPENEVIDENCE_API_KEY`
 - `OPENEVIDENCE_BASE_URL`
@@ -121,6 +123,39 @@ Deprecated endpoints:
 - `/api/integrations/heygen`
 - `/api/heygen/avatars`
 - `/api/heygen/speak`
+
+## Verify HeyGen Lite New
+
+`POST /api/liveavatar/lite/new` now proxies HeyGen Lite session creation and returns the upstream JSON body (required for WebRTC offer/ICE negotiation).
+
+```bash
+curl -i -X POST http://localhost:8000/api/liveavatar/lite/new \
+  -H "Content-Type: application/json" \
+  -d '{
+    "avatar_id": "9a4f4b1f-86f9-4acf-9a37-b81c21ae95e4",
+    "language": "en",
+    "video_encoding": "VP8",
+    "video_quality": "high",
+    "is_sandbox": false
+  }'
+```
+
+Expected:
+- `HTTP/1.1 200 OK`
+- `Content-Type: application/json`
+- Non-empty JSON body from HeyGen (for example `session_id`, `sdp`, `ice_servers`/signaling fields).
+
+If `HEYGEN_API_KEY` is missing:
+
+```bash
+curl -i -X POST http://localhost:8000/api/liveavatar/lite/new \
+  -H "Content-Type: application/json" \
+  -d '{"avatar_id":"9a4f4b1f-86f9-4acf-9a37-b81c21ae95e4"}'
+```
+
+Expected:
+- `HTTP/1.1 500`
+- JSON body: `{"error":"HEYGEN_API_KEY missing"}`
 
 ## Coach Script Generator
 

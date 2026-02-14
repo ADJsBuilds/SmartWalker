@@ -1,6 +1,8 @@
+import logging
 from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.agents.lite_agent import lite_agent_manager
@@ -10,6 +12,7 @@ from app.services.elevenlabs_tts import ElevenLabsTTSService
 from app.services.liveavatar_lite import LiveAvatarLiteClient
 
 router = APIRouter(tags=['liveavatar-lite'])
+logger = logging.getLogger(__name__)
 
 
 class LiteCreatePayload(BaseModel):
@@ -136,16 +139,42 @@ async def start_lite_session(payload: LiteStartPayload):
     }
 
 
-@router.post('/api/liveavatar/lite/new', response_model=LiteStartResponse)
-async def create_and_start_lite_session(payload: LiteCreatePayload):
-    create_result = await create_lite_token(payload)
-    if not create_result.get('ok'):
-        return {'ok': False, 'error': create_result.get('error'), 'raw': create_result.get('raw')}
+@router.post('/api/liveavatar/lite/new')
+async def create_and_start_lite_session(payload: Dict[str, Any]):
+    result = await LiveAvatarLiteClient().create_heygen_lite_session(payload)
 
-    start_result = await start_lite_session(LiteStartPayload(session_token=str(create_result.get('session_token') or '')))
-    if not start_result.get('ok'):
-        return {'ok': False, 'error': start_result.get('error'), 'raw': start_result.get('raw')}
-    return start_result
+    if result.get('status_code') == 500 and result.get('error') == 'HEYGEN_API_KEY missing':
+        return JSONResponse(status_code=500, content={'error': 'HEYGEN_API_KEY missing'})
+
+    if result.get('status_code') == 502 and result.get('error') == 'HeyGen request failed':
+        return JSONResponse(
+            status_code=502,
+            content={'error': 'HeyGen request failed', 'detail': str(result.get('detail') or 'request failed')},
+        )
+
+    status_code = int(result.get('status_code') or 502)
+    json_parsed = bool(result.get('json_parsed'))
+    body_json = result.get('body_json')
+    body_text = str(result.get('body_text') or '')
+
+    if status_code >= 400:
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                'error': 'HeyGen lite/new failed',
+                'status_code': status_code,
+                'body': body_json if json_parsed else body_text,
+            },
+        )
+
+    if not json_parsed or body_json is None:
+        logger.error('HeyGen lite/new returned success status with empty/non-JSON body')
+        return JSONResponse(
+            status_code=502,
+            content={'error': 'HeyGen returned empty body on success', 'status_code': status_code},
+        )
+
+    return JSONResponse(status_code=200, content=body_json)
 
 
 @router.post('/api/liveavatar/lite/stop', response_model=LiteStopResponse)
