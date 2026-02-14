@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     openevidence_api_key: str = ''
     openevidence_base_url: str = ''
     heygen_base_url: str = ''
+    heygen_avatar_id: str = ''  # HeyGen avatar ID (required for avatar generation)
+    heygen_voice_id: str = ''  # Optional: specific voice ID, otherwise uses avatar default
+    heygen_mode: str = 'video'  # 'video' for video generation, 'streaming' for real-time streaming
     cors_allow_origins: List[str] = ['*']
     log_level: str = 'INFO'
 

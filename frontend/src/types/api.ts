@@ -64,9 +64,12 @@ export interface AgentAskResponse {
 }
 
 export interface HeyGenResponse {
-  mode?: string;
+  mode?: 'heygen' | 'fallback';
   text?: string;
+  video_url?: string;
+  url?: string;  // Alias for video_url for compatibility
   raw?: Record<string, unknown>;
+  error?: string;
   detail?: string;
 }
 

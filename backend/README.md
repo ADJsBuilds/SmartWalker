@@ -50,7 +50,12 @@ Set environment variables in Render dashboard:
 - `STORAGE_DIR`
 - `CORS_ALLOW_ORIGINS`
 - `LOG_LEVEL`
-- `HEYGEN_API_KEY`
-- `HEYGEN_BASE_URL`
+- `HEYGEN_API_KEY` (required for HeyGen)
+- `HEYGEN_BASE_URL` (e.g., `https://api.heygen.com/v1/video/generate`)
+- `HEYGEN_AVATAR_ID` (required - your HeyGen avatar ID)
+- `HEYGEN_VOICE_ID` (optional - specific voice, otherwise uses avatar default)
+- `HEYGEN_MODE` (optional - `video` or `streaming`, default: `video`)
 - `OPENEVIDENCE_API_KEY`
 - `OPENEVIDENCE_BASE_URL`
+
+See `HEYGEN_SETUP.md` for detailed HeyGen configuration instructions.

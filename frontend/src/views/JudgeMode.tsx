@@ -196,17 +196,31 @@ function display(value: unknown): string {
   return Number.isFinite(n) ? String(Math.round(n * 100) / 100) : '-';
 }
 
-function extractPlayableUrl(raw: unknown): string | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const obj = raw as Record<string, unknown>;
+function extractPlayableUrl(response: unknown): string | null {
+  if (!response || typeof response !== 'object') return null;
+  const obj = response as Record<string, unknown>;
+  
+  // New format: direct video_url or url fields
+  if (typeof obj.video_url === 'string') return obj.video_url;
   if (typeof obj.url === 'string') return obj.url;
-  if (typeof obj.videoUrl === 'string') return obj.videoUrl;
+  
+  // Legacy format: nested in raw
   if (obj.raw && typeof obj.raw === 'object') {
     const nested = obj.raw as Record<string, unknown>;
     if (typeof nested.url === 'string') return nested.url;
     if (typeof nested.videoUrl === 'string') return nested.videoUrl;
+    if (typeof nested.video_url === 'string') return nested.video_url;
     if (typeof nested.download_url === 'string') return nested.download_url;
+    
+    // Check nested data object
+    if (nested.data && typeof nested.data === 'object') {
+      const data = nested.data as Record<string, unknown>;
+      if (typeof data.url === 'string') return data.url;
+      if (typeof data.video_url === 'string') return data.video_url;
+      if (typeof data.download_url === 'string') return data.download_url;
+    }
   }
+  
   return null;
 }
 
