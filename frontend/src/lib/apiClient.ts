@@ -9,6 +9,10 @@ import type {
   LiveAgentSessionBootstrapResponse,
   LiveAgentSessionStartResponse,
   LiveAgentSessionTokenResponse,
+  LiveAvatarLiteCreateResponse,
+  LiveAvatarLiteSessionStatus,
+  LiveAvatarLiteStartResponse,
+  LiveAvatarLiteStopResponse,
   MergedState,
   Resident,
   ResidentDocument,
@@ -172,6 +176,50 @@ export class ApiClient {
 
   requestZoomInvite(payload: { contactLabel?: string; phrase?: string }): Promise<ZoomInviteResponse> {
     return this.request('/api/carrier/zoom-invite', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  createLiveAvatarLiteSession(payload: {
+    avatar_id?: string;
+    voice_id?: string;
+    context_id?: string;
+    language?: string;
+    video_encoding?: 'VP8' | 'H264';
+    video_quality?: 'low' | 'medium' | 'high' | 'very_high';
+    is_sandbox?: boolean;
+  }): Promise<LiveAvatarLiteCreateResponse> {
+    return this.request('/api/liveavatar/lite/create', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  startLiveAvatarLiteSession(payload: { session_token: string }): Promise<LiveAvatarLiteStartResponse> {
+    return this.request('/api/liveavatar/lite/start', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  createAndStartLiveAvatarLiteSession(payload: {
+    avatar_id?: string;
+    voice_id?: string;
+    context_id?: string;
+    language?: string;
+    video_encoding?: 'VP8' | 'H264';
+    video_quality?: 'low' | 'medium' | 'high' | 'very_high';
+    is_sandbox?: boolean;
+  }): Promise<LiveAvatarLiteStartResponse> {
+    return this.request('/api/liveavatar/lite/new', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  stopLiveAvatarLiteSession(payload: { session_id: string; session_token: string }): Promise<LiveAvatarLiteStopResponse> {
+    return this.request('/api/liveavatar/lite/stop', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  getLiveAvatarLiteStatus(sessionId: string): Promise<LiveAvatarLiteSessionStatus> {
+    return this.request(`/api/liveavatar/lite/status/${encodeURIComponent(sessionId)}`, { method: 'GET' });
+  }
+
+  sendLiveAvatarLiteInterrupt(payload: { session_id: string }): Promise<{ ok: boolean; error?: string }> {
+    return this.request('/api/liveavatar/lite/interrupt', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  sendLiveAvatarLiteTestTone(payload: { session_id: string; duration_seconds?: number; frequency_hz?: number }): Promise<{ ok: boolean; error?: string }> {
+    return this.request('/api/liveavatar/lite/test-tone', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 

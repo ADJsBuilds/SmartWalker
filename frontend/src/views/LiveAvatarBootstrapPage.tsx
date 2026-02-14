@@ -1,144 +1,59 @@
-import { useEffect, useRef, useState } from 'react';
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { LiveAvatarLiteSessionManager, type LiteUiState } from '../lib/liveavatarSession';
 import { useRealtimeState } from '../store/realtimeState';
 
-type ConnectStatus =
-  | 'idle'
-  | 'bootstrapping'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'disconnected'
-  | 'error';
-
-function isUnauthorizedTokenError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return message.includes('401') || message.includes('unauthorized') || message.includes('invalid token');
-}
-
 export function LiveAvatarBootstrapPage() {
-  const { apiClient, activeResidentId } = useRealtimeState();
-  const [status, setStatus] = useState<ConnectStatus>('idle');
+  const { apiClient } = useRealtimeState();
+  const [status, setStatus] = useState<LiteUiState>('idle');
   const [errorText, setErrorText] = useState<string | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const roomRef = useRef<Room | null>(null);
   const videoHostRef = useRef<HTMLDivElement | null>(null);
+  const pushLog = (message: string) => setLogLines((prev) => [message, ...prev].slice(0, 24));
 
-  const pushLog = (message: string) => {
-    setLogLines((prev) => [message, ...prev].slice(0, 16));
-  };
+  const manager = useMemo(
+    () =>
+      new LiveAvatarLiteSessionManager(apiClient, {
+        onState: setStatus,
+        onError: setErrorText,
+        onLog: pushLog,
+      }),
+    [apiClient],
+  );
 
-  const cleanupMedia = () => {
+  const connectLite = async () => {
     if (!videoHostRef.current) return;
+    setErrorText(null);
+    setLogLines([]);
     videoHostRef.current.innerHTML = '';
+    await manager.start(
+      {
+        language: 'en',
+        video_quality: 'high',
+        video_encoding: 'VP8',
+      },
+      videoHostRef.current,
+    );
+    setSessionId(manager.currentSessionId);
   };
 
   const disconnect = async () => {
-    const room = roomRef.current;
-    if (!room) return;
-    room.removeAllListeners();
-    await room.disconnect();
-    roomRef.current = null;
-    cleanupMedia();
-    setStatus('disconnected');
-    pushLog('Disconnected from LiveKit room.');
-  };
-
-  const connectWithBootstrap = async (retryOn401 = true) => {
-    setErrorText(null);
-    setStatus('bootstrapping');
-    pushLog('Requesting /api/liveagent/session/bootstrap...');
-
-    const bootstrap = await apiClient.bootstrapLiveAgentSession({
-      residentId: activeResidentId,
-      mode: 'FULL',
-      interactivityType: 'PUSH_TO_TALK',
-      language: 'en',
-    });
-
-    if (!bootstrap.ok || !bootstrap.livekitUrl || !bootstrap.livekitClientToken || !bootstrap.sessionId) {
-      const message = bootstrap.error || 'Bootstrap failed: missing livekitUrl/livekitClientToken/sessionId.';
-      setStatus('error');
-      setErrorText(message);
-      pushLog(`Bootstrap failed: ${message}`);
-      return;
-    }
-
-    setSessionId(bootstrap.sessionId);
-    pushLog(`Bootstrap success. sessionId=${bootstrap.sessionId}`);
-    setStatus('connecting');
-
-    const room = new Room();
-    roomRef.current = room;
-
-    room.on(RoomEvent.Connected, () => {
-      setStatus('connected');
-      pushLog('Connected to LiveKit room.');
-    });
-
-    room.on(RoomEvent.Reconnecting, () => {
-      setStatus('reconnecting');
-      pushLog('Reconnecting...');
-    });
-
-    room.on(RoomEvent.Reconnected, () => {
-      setStatus('connected');
-      pushLog('Reconnected.');
-    });
-
-    room.on(RoomEvent.Disconnected, (reason) => {
-      setStatus('disconnected');
-      pushLog(`Disconnected. reason=${String(reason || 'unknown')}`);
-    });
-
-    room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-      pushLog(`Track subscribed: kind=${track.kind}, participant=${participant.identity}`);
-      if (!videoHostRef.current) return;
-      const element = track.attach();
-      if (track.kind === Track.Kind.Video) {
-        element.className = 'h-full w-full rounded-xl object-contain bg-black';
-      }
-      if (track.kind === Track.Kind.Audio) {
-        element.className = 'hidden';
-      }
-      videoHostRef.current.appendChild(element);
-      pushLog(`Rendered track (${publication.trackSid}).`);
-    });
-
-    room.on(RoomEvent.TrackUnsubscribed, (track) => {
-      track.detach().forEach((el) => el.remove());
-      pushLog('Track unsubscribed.');
-    });
-
-    try {
-      await room.connect(bootstrap.livekitUrl, bootstrap.livekitClientToken);
-    } catch (error) {
-      pushLog(`Connect failed: ${error instanceof Error ? error.message : 'unknown error'}`);
-      await disconnect();
-      if (retryOn401 && isUnauthorizedTokenError(error)) {
-        pushLog('Detected invalid token (401). Re-running bootstrap and retrying once...');
-        await connectWithBootstrap(false);
-        return;
-      }
-      setStatus('error');
-      setErrorText(error instanceof Error ? error.message : 'Failed to connect to LiveKit room.');
-    }
+    await manager.stop();
+    setSessionId(null);
+    pushLog('Disconnected.');
   };
 
   useEffect(() => {
     return () => {
-      disconnect();
+      void manager.stop();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [manager]);
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-white sm:p-6">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
         <div className="rounded-2xl bg-slate-900 p-4 sm:p-6">
-          <h1 className="text-2xl font-black">LiveAvatar Bootstrap Test</h1>
+          <h1 className="text-2xl font-black">LiveAvatar LITE Test</h1>
           <p className="mt-2 text-sm text-slate-300">
             Status: <span className="font-bold">{status}</span>
             {sessionId ? ` | sessionId: ${sessionId}` : ''}
@@ -147,17 +62,31 @@ export function LiveAvatarBootstrapPage() {
           <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={() => connectWithBootstrap(true)}
+              onClick={() => void connectLite()}
               className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white"
             >
-              Connect via /bootstrap
+              Connect via /api/liveavatar/lite/new
             </button>
             <button
               type="button"
-              onClick={disconnect}
+              onClick={() => void disconnect()}
               className="rounded-xl bg-slate-700 px-4 py-2 font-bold text-white"
             >
               Disconnect
+            </button>
+            <button
+              type="button"
+              onClick={() => void manager.speakTestTone(1, 660)}
+              className="rounded-xl bg-sky-700 px-4 py-2 font-bold text-white"
+            >
+              Send Test Tone
+            </button>
+            <button
+              type="button"
+              onClick={() => void manager.interrupt()}
+              className="rounded-xl bg-rose-700 px-4 py-2 font-bold text-white"
+            >
+              Interrupt
             </button>
           </div>
         </div>

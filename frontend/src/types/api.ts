@@ -142,6 +142,45 @@ export interface ZoomInviteResponse {
   sentTo: string;
 }
 
+export interface LiveAvatarLiteCreateResponse {
+  ok: boolean;
+  session_id?: string;
+  session_token?: string;
+  error?: string;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface LiveAvatarLiteStartResponse {
+  ok: boolean;
+  session_id?: string;
+  session_token?: string;
+  livekit_url?: string;
+  livekit_client_token?: string;
+  livekit_agent_token?: string;
+  ws_url?: string;
+  max_session_duration?: number;
+  agent_ws_registered?: boolean;
+  error?: string;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface LiveAvatarLiteStopResponse {
+  ok: boolean;
+  error?: string;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface LiveAvatarLiteSessionStatus {
+  exists: boolean;
+  session_id?: string;
+  ws_connected?: boolean;
+  session_state?: string;
+  livekit_state?: string;
+  last_error?: string | null;
+  ready?: boolean;
+  last_event_type?: string | null;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;
