@@ -35,10 +35,11 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   }, [fall, isExercising]);
 
   useEffect(() => {
-    liveAgentRef.current = new LiveAgentController(apiClient);
+    const controller = new LiveAgentController(apiClient);
+    liveAgentRef.current = controller;
     return () => {
-      liveAgentRef.current?.disconnect();
       liveAgentRef.current = null;
+      void controller.disconnect();
     };
   }, [apiClient]);
 

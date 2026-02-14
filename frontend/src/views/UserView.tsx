@@ -15,6 +15,7 @@ export function UserView() {
   const [status, setStatus] = useState<ConnectStatus>('idle');
   const [errorText, setErrorText] = useState<string | null>(null);
   const [isTalking, setIsTalking] = useState(false);
+  const isUnmountedRef = useRef(false);
   const roomRef = useRef<Room | null>(null);
   const audioTrackRef = useRef<LocalAudioTrack | null>(null);
   const videoHostRef = useRef<HTMLDivElement | null>(null);
@@ -23,17 +24,20 @@ export function UserView() {
     if (videoHostRef.current) videoHostRef.current.innerHTML = '';
   };
 
-  const disconnect = async () => {
+  const disconnect = async (suppressStatusUpdate = false) => {
     const room = roomRef.current;
     if (!room) return;
     room.removeAllListeners();
     await room.disconnect();
     roomRef.current = null;
     clearVideo();
-    setStatus('disconnected');
+    if (!suppressStatusUpdate && !isUnmountedRef.current) {
+      setStatus('disconnected');
+    }
   };
 
   const connect = async (retryOn401 = true) => {
+    if (isUnmountedRef.current) return;
     setStatus('bootstrapping');
     setErrorText(null);
     const bootstrap = await apiClient.bootstrapLiveAgentSession({
@@ -50,10 +54,18 @@ export function UserView() {
 
     const room = new Room();
     roomRef.current = room;
-    room.on(RoomEvent.Connected, () => setStatus('connected'));
-    room.on(RoomEvent.Reconnecting, () => setStatus('reconnecting'));
-    room.on(RoomEvent.Reconnected, () => setStatus('connected'));
-    room.on(RoomEvent.Disconnected, () => setStatus('disconnected'));
+    room.on(RoomEvent.Connected, () => {
+      if (!isUnmountedRef.current) setStatus('connected');
+    });
+    room.on(RoomEvent.Reconnecting, () => {
+      if (!isUnmountedRef.current) setStatus('reconnecting');
+    });
+    room.on(RoomEvent.Reconnected, () => {
+      if (!isUnmountedRef.current) setStatus('connected');
+    });
+    room.on(RoomEvent.Disconnected, () => {
+      if (!isUnmountedRef.current) setStatus('disconnected');
+    });
     room.on(RoomEvent.TrackSubscribed, (track) => {
       if (!videoHostRef.current) return;
       const el = track.attach();
@@ -72,8 +84,10 @@ export function UserView() {
         await connect(false);
         return;
       }
-      setStatus('error');
-      setErrorText(error instanceof Error ? error.message : 'Unable to connect to LiveKit.');
+      if (!isUnmountedRef.current) {
+        setStatus('error');
+        setErrorText(error instanceof Error ? error.message : 'Unable to connect to LiveKit.');
+      }
     }
   };
 
@@ -102,16 +116,17 @@ export function UserView() {
   };
 
   useEffect(() => {
+    isUnmountedRef.current = false;
     connect(true);
     return () => {
-      const cleanup = async () => {
+      isUnmountedRef.current = true;
+      void (async () => {
         if (audioTrackRef.current) {
           await audioTrackRef.current.stop();
           audioTrackRef.current = null;
         }
-        await disconnect();
-      };
-      void cleanup();
+        await disconnect(true);
+      })();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
