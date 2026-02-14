@@ -15,8 +15,8 @@ export function App() {
     <main className="min-h-screen bg-slate-950 p-4 text-white sm:p-5">
       <Toasts />
       <div className="mx-auto max-w-7xl space-y-4 pb-10">
-        <header className="flex items-center justify-between rounded-2xl bg-slate-900/90 p-3">
-          <div className="flex items-center gap-2">
+        <header className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-900/90 p-3">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setMode('judge')}
