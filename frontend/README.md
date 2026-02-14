@@ -40,6 +40,7 @@ Default fallback: `http://localhost:8000`
 - `/cv` standalone CV window (independent websocket)
 - `/user` production user-facing LiveAvatar screen (full-screen avatar + orange press-to-talk button)
 - `/liveavatar-test` LiveAvatar bootstrap + LiveKit connection test page
+- `/voice-agent-playground` ElevenLabs Agents websocket playground (text-first + contextual updates)
 
 ## LiveAvatar Test Page
 

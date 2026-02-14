@@ -66,6 +66,34 @@ Set environment variables in Render dashboard:
 - `GEMINI_BASE_URL` (optional, default: `https://generativelanguage.googleapis.com/v1beta`)
 - `COACH_SCRIPT_COOLDOWN_SECONDS` (optional, default: `8`)
 
+## ElevenLabs Agent WebSocket (MVP)
+
+Required env vars:
+- `ELEVENLABS_API_KEY` (required, server-side only)
+- `ELEVENLABS_AGENT_ID` (optional default for signed URL calls)
+- `ELEVENLABS_BASE_URL` (optional, default: `https://api.elevenlabs.io`)
+
+Signed URL endpoint:
+- `GET /api/eleven/signed-url?agent_id=<agent_id>`
+- If `agent_id` is omitted, backend uses `ELEVENLABS_AGENT_ID`.
+- Response shape: `{ "signed_url": "wss://..." }`
+
+Optional app session endpoint:
+- `POST /api/eleven/session`
+- Body: `{ "agent_id": "...", "user_id": "..." }` (both optional if default agent is configured)
+- Response shape: `{ "session_id": "<uuid>", "signed_url": "wss://..." }`
+
+Quick curl test:
+
+```bash
+curl -s "http://localhost:8000/api/eleven/signed-url?agent_id=<your_agent_id>" | jq
+```
+
+Expected:
+- HTTP `200`
+- JSON with non-empty `signed_url`
+- No API key in response body
+
 ## LiveAvatar API (Current Flow)
 
 The backend follows the strict sequence:

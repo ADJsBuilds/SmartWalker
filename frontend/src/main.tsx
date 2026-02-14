@@ -5,6 +5,7 @@ import App from './App';
 import { CvPage } from './pages/CvPage';
 import { LiveAvatarBootstrapPage } from './views/LiveAvatarBootstrapPage';
 import { UserView } from './views/UserView';
+import { VoiceAgentPlayground } from './views/VoiceAgentPlayground';
 import { RealtimeStateProvider } from './store/realtimeState';
 import './index.css';
 
@@ -17,6 +18,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/cv" element={<CvPage />} />
           <Route path="/user" element={<UserView />} />
           <Route path="/liveavatar-test" element={<LiveAvatarBootstrapPage />} />
+          <Route path="/voice-agent-playground" element={<VoiceAgentPlayground />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </RealtimeStateProvider>

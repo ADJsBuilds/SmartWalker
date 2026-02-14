@@ -4,6 +4,8 @@ import type {
   CoachScriptRequest,
   CoachScriptResponse,
   DocumentDetails,
+  ElevenSessionResponse,
+  ElevenSignedUrlResponse,
   ExerciseSuggestionsResponse,
   HeyGenResponse,
   LiveAgentSessionEventResponse,
@@ -276,6 +278,17 @@ export class ApiClient {
 
   speakElevenLabs(payload: { text: string; voice_id?: string; model_id?: string }): Promise<Blob> {
     return this.requestBlob('/api/elevenlabs/speak', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  getElevenSignedUrl(agentId?: string): Promise<ElevenSignedUrlResponse> {
+    const params = new URLSearchParams();
+    if (agentId?.trim()) params.set('agent_id', agentId.trim());
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/api/eleven/signed-url${suffix}`, { method: 'GET' });
+  }
+
+  createElevenSession(payload: { agent_id?: string; user_id?: string }): Promise<ElevenSessionResponse> {
+    return this.request('/api/eleven/session', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 

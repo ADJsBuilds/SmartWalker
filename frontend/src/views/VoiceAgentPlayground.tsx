@@ -1,0 +1,372 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { ContextManager } from '../lib/contextManager';
+import { useRealtimeState } from '../store/realtimeState';
+
+type SocketStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+
+interface LogEntry {
+  id: string;
+  ts: string;
+  direction: 'in' | 'out' | 'sys';
+  payload: unknown;
+}
+
+export function VoiceAgentPlayground() {
+  const { apiClient, notify } = useRealtimeState();
+  const [agentId, setAgentId] = useState('');
+  const [userId, setUserId] = useState('demo-user');
+  const [messageText, setMessageText] = useState('');
+  const [socketStatus, setSocketStatus] = useState<SocketStatus>('idle');
+  const [latestTranscript, setLatestTranscript] = useState('');
+  const [latestAgentText, setLatestAgentText] = useState('');
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [autoMetrics, setAutoMetrics] = useState(false);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const contextManagerRef = useRef<ContextManager | null>(null);
+  const metricTimerRef = useRef<number | null>(null);
+  const stepsRef = useRef(150);
+  const gaitAsymmetryRef = useRef(0.22);
+  const tiltWarningRef = useRef(false);
+  const connected = socketStatus === 'open';
+
+  const canSend = useMemo(() => connected && Boolean(messageText.trim()), [connected, messageText]);
+
+  useEffect(() => {
+    return () => {
+      stopAutoMetrics();
+      contextManagerRef.current?.dispose();
+      contextManagerRef.current = null;
+      if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) wsRef.current.close();
+      wsRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!autoMetrics || !connected) return;
+    metricTimerRef.current = window.setInterval(() => {
+      stepsRef.current += 1;
+      gaitAsymmetryRef.current = clamp(gaitAsymmetryRef.current + randomInRange(-0.01, 0.02), 0, 1);
+      contextManagerRef.current?.updateMetrics({
+        steps_today: stepsRef.current,
+        cadence_spm: Math.round(randomInRange(80, 95)),
+        gait_asymmetry: gaitAsymmetryRef.current,
+        tilt_deg: Number(randomInRange(1.5, 4.5).toFixed(2)),
+        tilt_warning: tiltWarningRef.current,
+        fall_risk: gaitAsymmetryRef.current >= 0.35 ? 'high' : gaitAsymmetryRef.current >= 0.25 ? 'moderate' : 'low',
+      });
+    }, 1000);
+    return () => stopAutoMetrics();
+  }, [autoMetrics, connected]);
+
+  const appendLog = (direction: LogEntry['direction'], payload: unknown) => {
+    setLogs((prev) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        ts: new Date().toLocaleTimeString(),
+        direction,
+        payload,
+      },
+      ...prev,
+    ].slice(0, 120));
+  };
+
+  const startSession = async () => {
+    if (connected || socketStatus === 'connecting') return;
+    setSocketStatus('connecting');
+    setLatestTranscript('');
+    setLatestAgentText('');
+    try {
+      const session = await apiClient.createElevenSession({
+        agent_id: agentId.trim() || undefined,
+        user_id: userId.trim() || undefined,
+      });
+      const ws = new WebSocket(session.signed_url);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setSocketStatus('open');
+        appendLog('sys', { type: 'connected', session_id: session.session_id });
+
+        const manager = new ContextManager({
+          throttleMs: 2000,
+          sendUpdateText: (text) => sendSocketEvent({ type: 'contextual_update', text }),
+        });
+        contextManagerRef.current = manager;
+        manager.setPatientProfile({
+          name: 'Margaret',
+          age: 78,
+          summary: 'post-hip replacement',
+          risk: 'moderate',
+        });
+        manager.setGoals({ target_steps: 300 });
+        manager.updateUiState({ screen: 'voice_agent_playground', exercise_phase: 'warmup' });
+        manager.updateMetrics({
+          steps_today: stepsRef.current,
+          cadence_spm: 84,
+          gait_asymmetry: gaitAsymmetryRef.current,
+          tilt_deg: 3.1,
+          tilt_warning: false,
+          fall_risk: 'low',
+        });
+      };
+
+      ws.onmessage = (event) => {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(String(event.data));
+        } catch {
+          payload = { type: 'raw', data: String(event.data) };
+        }
+        appendLog('in', payload);
+        routeIncomingEvent(payload);
+      };
+
+      ws.onerror = () => {
+        setSocketStatus('error');
+        appendLog('sys', { type: 'error', detail: 'websocket error' });
+      };
+
+      ws.onclose = (event) => {
+        setSocketStatus('closed');
+        appendLog('sys', { type: 'closed', code: event.code, reason: event.reason });
+      };
+    } catch (error) {
+      setSocketStatus('error');
+      notify(error instanceof Error ? error.message : 'Failed to start ElevenLabs session.', 'error');
+      appendLog('sys', { type: 'start_failed', error: error instanceof Error ? error.message : 'unknown' });
+    }
+  };
+
+  const stopSession = () => {
+    stopAutoMetrics();
+    contextManagerRef.current?.dispose();
+    contextManagerRef.current = null;
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) wsRef.current.close(1000, 'client stop');
+    wsRef.current = null;
+    setSocketStatus('closed');
+    appendLog('sys', { type: 'stopped' });
+  };
+
+  const sendUserMessage = () => {
+    const text = messageText.trim();
+    if (!text) return;
+    sendSocketEvent({ type: 'user_message', text });
+    setMessageText('');
+  };
+
+  const sendSocketEvent = (payload: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(payload));
+    appendLog('out', payload);
+  };
+
+  const sendCriticalTiltWarning = () => {
+    tiltWarningRef.current = true;
+    contextManagerRef.current?.updateMetrics({
+      tilt_warning: true,
+      tilt_deg: 12.5,
+      fall_risk: 'high',
+      gait_asymmetry: Number((gaitAsymmetryRef.current + 0.1).toFixed(2)),
+    });
+    contextManagerRef.current?.emitCriticalEvent('tilt_warning', { tilt_deg: 12.5, fall_risk: 'high' });
+  };
+
+  const routeIncomingEvent = (payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return;
+    const event = payload as Record<string, unknown>;
+    const type = String(event.type || '');
+
+    if (type === 'ping') {
+      const pingEvent = (event.ping_event as Record<string, unknown> | undefined) || {};
+      const eventId = String(pingEvent.event_id || event.event_id || '');
+      if (eventId) sendSocketEvent({ type: 'pong', event_id: eventId });
+      return;
+    }
+
+    if (type === 'client_tool_call') {
+      const call = (event.client_tool_call as Record<string, unknown> | undefined) || {};
+      const toolCallId = String(call.tool_call_id || '');
+      if (toolCallId) {
+        sendSocketEvent({
+          type: 'client_tool_result',
+          tool_call_id: toolCallId,
+          result: 'NOT IMPLEMENTED',
+          is_error: true,
+        });
+      }
+      return;
+    }
+
+    const transcriptText = extractText(event, [
+      'user_transcript',
+      'transcript',
+      'text',
+      'user_text',
+    ]);
+    if (type.includes('transcript') && transcriptText) {
+      setLatestTranscript(transcriptText);
+    }
+
+    const agentText = extractText(event, ['agent_response', 'response', 'text']);
+    if ((type.includes('agent') || type.includes('response')) && agentText) {
+      setLatestAgentText(agentText);
+    }
+  };
+
+  const stopAutoMetrics = () => {
+    if (metricTimerRef.current) {
+      window.clearInterval(metricTimerRef.current);
+      metricTimerRef.current = null;
+    }
+  };
+
+  return (
+    <section className="space-y-4 pb-24">
+      <div className="rounded-2xl bg-slate-900 p-4 text-slate-100 sm:p-6">
+        <h2 className="text-2xl font-bold">Voice Agent Playground (ElevenLabs)</h2>
+        <p className="mt-2 text-sm text-slate-300">
+          Text-first websocket testbed with rapid contextual updates and event routing.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl bg-slate-900 p-4 text-slate-100">
+          <p className="mb-3 text-sm uppercase tracking-wide text-slate-300">Session</p>
+          <label className="mb-2 block text-sm text-slate-300">Agent ID (optional)</label>
+          <input
+            value={agentId}
+            onChange={(event) => setAgentId(event.target.value)}
+            placeholder="Uses backend ELEVENLABS_AGENT_ID if empty"
+            className="mb-3 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+          />
+          <label className="mb-2 block text-sm text-slate-300">User ID (optional)</label>
+          <input
+            value={userId}
+            onChange={(event) => setUserId(event.target.value)}
+            placeholder="demo-user"
+            className="mb-4 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={startSession}
+              disabled={connected || socketStatus === 'connecting'}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              Start session
+            </button>
+            <button
+              type="button"
+              onClick={stopSession}
+              disabled={!connected}
+              className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              Stop
+            </button>
+          </div>
+          <p className="mt-3 text-sm text-slate-300">Status: {socketStatus}</p>
+        </div>
+
+        <div className="rounded-2xl bg-slate-900 p-4 text-slate-100">
+          <p className="mb-3 text-sm uppercase tracking-wide text-slate-300">Messaging</p>
+          <input
+            value={messageText}
+            onChange={(event) => setMessageText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') sendUserMessage();
+            }}
+            placeholder="Type a user message..."
+            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={sendUserMessage}
+              disabled={!canSend}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              Send user_message
+            </button>
+            <button
+              type="button"
+              onClick={() => setAutoMetrics((prev) => !prev)}
+              disabled={!connected}
+              className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              {autoMetrics ? 'Stop metrics timer' : 'Start metrics timer'}
+            </button>
+            <button
+              type="button"
+              onClick={sendCriticalTiltWarning}
+              disabled={!connected}
+              className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              Trigger tilt warning
+            </button>
+          </div>
+          <div className="mt-4 space-y-1 rounded-xl border border-slate-700 bg-slate-800 p-3 text-sm">
+            <p>
+              <span className="text-slate-300">Latest transcript:</span> {latestTranscript || '—'}
+            </p>
+            <p>
+              <span className="text-slate-300">Latest agent response:</span> {latestAgentText || '—'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-slate-900 p-4 text-slate-100">
+        <p className="mb-3 text-sm uppercase tracking-wide text-slate-300">Event log</p>
+        <div className="max-h-[420px] space-y-2 overflow-y-auto">
+          {logs.length === 0 ? (
+            <p className="text-sm text-slate-400">No events yet.</p>
+          ) : (
+            logs.map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-slate-700 bg-slate-800 p-3 text-xs">
+                <p className="mb-1 text-slate-400">
+                  [{entry.ts}] {entry.direction.toUpperCase()}
+                </p>
+                <pre className="whitespace-pre-wrap break-words">{safePrettyJson(entry.payload)}</pre>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function extractText(payload: Record<string, unknown>, candidateKeys: string[]): string {
+  for (const key of candidateKeys) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value && typeof value === 'object') {
+      const inner = value as Record<string, unknown>;
+      for (const nestedKey of ['text', 'response', 'transcript']) {
+        const nestedValue = inner[nestedKey];
+        if (typeof nestedValue === 'string' && nestedValue.trim()) return nestedValue.trim();
+      }
+    }
+  }
+  return '';
+}
+
+function safePrettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function randomInRange(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+

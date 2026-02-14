@@ -181,6 +181,15 @@ export interface LiveAvatarLiteSessionStatus {
   last_event_type?: string | null;
 }
 
+export interface ElevenSignedUrlResponse {
+  signed_url: string;
+}
+
+export interface ElevenSessionResponse {
+  session_id: string;
+  signed_url: string;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;

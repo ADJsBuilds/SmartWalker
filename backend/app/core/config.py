@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     liveagent_api_key: str = ''
     liveavatar_api_key: str = ''
     elevenlabs_api_key: str = ''
+    elevenlabs_agent_id: str = ''
     elevenlabs_base_url: str = 'https://api.elevenlabs.io'
     elevenlabs_voice_id: str = ''
     elevenlabs_model_id: str = 'eleven_multilingual_v2'
