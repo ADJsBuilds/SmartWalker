@@ -15,7 +15,12 @@ router = APIRouter(tags=['reports'])
 
 
 @router.post('/api/reports/daily/generate')
-def generate_daily_report(residentId: str, date: str, db: Session = Depends(get_db)):
+def generate_daily_report(
+    residentId: str,
+    date: str,
+    usePlaceholder: bool = False,
+    db: Session = Depends(get_db),
+):
     try:
         target_date = __import__('datetime').datetime.strptime(date, '%Y-%m-%d').date()
     except ValueError:
@@ -31,57 +36,78 @@ def generate_daily_report(residentId: str, date: str, db: Session = Depends(get_
         .all()
     )
 
-    steps_values = []
-    cadence_values = []
-    step_var_values = []
-    fall_count = 0
-    tilt_spikes = 0
-    has_walker = False
-    has_vision = False
+    if usePlaceholder:
+        stats = {
+            'samples': 48,
+            'steps': 1264,
+            'cadenceSpm_avg': 92.7,
+            'stepVar_avg': 13.2,
+            'fallSuspected_count': 1,
+            'tilt_spikes': 2,
+        }
+        has_walker = True
+        has_vision = True
+        struggles = [
+            'Frequent tilt spikes indicate periods of unstable walker control.',
+            'Cadence dropped during afternoon sessions, suggesting fatigue.',
+        ]
+        suggestions = [
+            'Schedule supervised gait practice focused on posture during turns.',
+            'Add a brief rest break after 15 minutes of continuous walking.',
+            'Reinforce cueing to keep both hands centered on the walker.',
+        ]
+    else:
+        steps_values = []
+        cadence_values = []
+        step_var_values = []
+        fall_count = 0
+        tilt_spikes = 0
+        has_walker = False
+        has_vision = False
 
-    for s in samples:
-        try:
-            merged = json.loads(s.merged_json or '{}')
-        except Exception:
-            merged = {}
-        metrics = merged.get('metrics') or {}
-        if isinstance(metrics.get('steps'), (int, float)):
-            steps_values.append(metrics['steps'])
-        if merged.get('walker'):
-            has_walker = True
-        vision = merged.get('vision') or {}
-        if vision:
-            has_vision = True
-        if isinstance(vision.get('cadenceSpm'), (int, float)):
-            cadence_values.append(vision['cadenceSpm'])
-        if isinstance(vision.get('stepVar'), (int, float)):
-            step_var_values.append(vision['stepVar'])
-        if metrics.get('fallSuspected'):
-            fall_count += 1
-        if isinstance(metrics.get('tiltDeg'), (int, float)) and metrics['tiltDeg'] >= 60:
-            tilt_spikes += 1
+        for s in samples:
+            try:
+                merged = json.loads(s.merged_json or '{}')
+            except Exception:
+                merged = {}
+            metrics = merged.get('metrics') or {}
+            if isinstance(metrics.get('steps'), (int, float)):
+                steps_values.append(metrics['steps'])
+            if merged.get('walker'):
+                has_walker = True
+            vision = merged.get('vision') or {}
+            if vision:
+                has_vision = True
+            if isinstance(vision.get('cadenceSpm'), (int, float)):
+                cadence_values.append(vision['cadenceSpm'])
+            if isinstance(vision.get('stepVar'), (int, float)):
+                step_var_values.append(vision['stepVar'])
+            if metrics.get('fallSuspected'):
+                fall_count += 1
+            if isinstance(metrics.get('tiltDeg'), (int, float)) and metrics['tiltDeg'] >= 60:
+                tilt_spikes += 1
 
-    stats = {
-        'samples': len(samples),
-        'steps': max(steps_values) if steps_values else 0,
-        'cadenceSpm_avg': round(sum(cadence_values) / len(cadence_values), 2) if cadence_values else None,
-        'stepVar_avg': round(sum(step_var_values) / len(step_var_values), 2) if step_var_values else None,
-        'fallSuspected_count': fall_count,
-        'tilt_spikes': tilt_spikes,
-    }
+        stats = {
+            'samples': len(samples),
+            'steps': max(steps_values) if steps_values else 0,
+            'cadenceSpm_avg': round(sum(cadence_values) / len(cadence_values), 2) if cadence_values else None,
+            'stepVar_avg': round(sum(step_var_values) / len(step_var_values), 2) if step_var_values else None,
+            'fallSuspected_count': fall_count,
+            'tilt_spikes': tilt_spikes,
+        }
 
-    struggles = []
-    if stats['stepVar_avg'] and stats['stepVar_avg'] > 15:
-        struggles.append('High step variability suggests gait instability.')
-    if fall_count >= 2:
-        struggles.append('Repeated fall-suspected events detected.')
-    if tilt_spikes >= 2:
-        struggles.append('Frequent tilt spikes indicate poor walker control.')
+        struggles = []
+        if stats['stepVar_avg'] and stats['stepVar_avg'] > 15:
+            struggles.append('High step variability suggests gait instability.')
+        if fall_count >= 2:
+            struggles.append('Repeated fall-suspected events detected.')
+        if tilt_spikes >= 2:
+            struggles.append('Frequent tilt spikes indicate poor walker control.')
 
-    suggestions = [
-        'Schedule supervised gait practice focused on balance transitions.',
-        'Review walker height/fit and reinforcement cues for posture.',
-    ]
+        suggestions = [
+            'Schedule supervised gait practice focused on balance transitions.',
+            'Review walker height/fit and reinforcement cues for posture.',
+        ]
 
     report_input = {
         'residentId': residentId,
@@ -120,6 +146,7 @@ def generate_daily_report(residentId: str, date: str, db: Session = Depends(get_
         'stats': stats,
         'struggles': struggles,
         'suggestions': suggestions,
+        'usedPlaceholderData': usePlaceholder,
         'reportInput': report_input,
         'narrativeSource': narrative_source,
         'narrative': final_narrative.model_dump(),
@@ -143,7 +170,7 @@ def generate_daily_report(residentId: str, date: str, db: Session = Depends(get_
         db.commit()
         db.refresh(report)
 
-    return {'pdfPath': out_path, 'reportId': report.id}
+    return {'pdfPath': out_path, 'reportId': report.id, 'usedPlaceholderData': usePlaceholder}
 
 
 @router.get('/api/reports/daily/{report_id}/download')
