@@ -11,18 +11,24 @@ export function DebugMode({ mergedState }: DebugModeProps) {
   const { activeResidentId, eventLog, lastUpdatedByResidentId, lastWalkerTsByResidentId, lastVisionTsByResidentId, lastMergedTsByResidentId } =
     useRealtimeState();
   const [showClinician, setShowClinician] = useState(true);
+  const walker = (mergedState?.walker || {}) as Record<string, unknown>;
   const vision = (mergedState?.vision || {}) as Record<string, unknown>;
   const metrics = mergedState?.metrics || {};
   const staleSeconds = Math.floor((Date.now() - (lastUpdatedByResidentId[activeResidentId] || 0)) / 1000);
   const stale = staleSeconds > 5;
   const rawJson = useMemo(() => JSON.stringify(mergedState || {}, null, 2), [mergedState]);
+  const walkerJson = useMemo(() => JSON.stringify(walker || {}, null, 2), [walker]);
+  const visionJson = useMemo(() => JSON.stringify(vision || {}, null, 2), [vision]);
 
   return (
     <section className="space-y-4 pb-28">
-      <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
-        <div className="rounded-2xl bg-slate-900 p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white">Camera / CV Feed</h3>
+      <div className="rounded-2xl bg-slate-900 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-lg font-bold text-white">Debug Dashboard (Separated Streams)</h3>
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${stale ? 'bg-amber-700 text-white' : 'bg-emerald-700 text-white'}`}>
+              {stale ? `Stale (${staleSeconds}s)` : 'Fresh'}
+            </span>
             <button
               type="button"
               onClick={() => window.open(`/cv?residentId=${encodeURIComponent(activeResidentId)}`, 'cvWindow', 'width=1100,height=800')}
@@ -31,33 +37,45 @@ export function DebugMode({ mergedState }: DebugModeProps) {
               Open CV Window
             </button>
           </div>
-          <div className="mt-3 flex min-h-[320px] items-center justify-center rounded-xl border-2 border-dashed border-slate-600 bg-slate-950">
-            <p className="text-slate-400">Camera stream placeholder (integration target)</p>
+        </div>
+        <div className="mt-3 rounded-xl bg-slate-950 p-3 text-xs text-slate-300">
+          <p>Last walker ts: {formatTs(lastWalkerTsByResidentId[activeResidentId])}</p>
+          <p>Last vision ts: {formatTs(lastVisionTsByResidentId[activeResidentId])}</p>
+          <p>Last merged ts: {formatTs(lastMergedTsByResidentId[activeResidentId])}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-2xl bg-slate-900 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-lg font-bold text-white">Sensor Data (Walker)</h3>
+            <span className="rounded-full bg-indigo-700 px-3 py-1 text-xs font-semibold text-white">Pipeline A</span>
           </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <MetricCard label="FSR Left" value={disp(walker.fsrLeft)} />
+            <MetricCard label="FSR Right" value={disp(walker.fsrRight)} />
+            <MetricCard label="Steps" value={disp(walker.steps ?? metrics.steps)} accent="good" />
+            <MetricCard label="Tilt Deg" value={disp(walker.tiltDeg ?? metrics.tiltDeg)} accent={Number(walker.tiltDeg ?? metrics.tiltDeg ?? 0) > 25 ? 'warn' : 'normal'} />
+            <MetricCard label="Reliance" value={disp(metrics.reliance)} />
+            <MetricCard label="Balance" value={disp(metrics.balance)} />
+          </div>
+          <pre className="mt-3 max-h-[240px] overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-200">{walkerJson}</pre>
         </div>
 
         <div className="rounded-2xl bg-slate-900 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white">Realtime Metrics</h3>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${stale ? 'bg-amber-700 text-white' : 'bg-emerald-700 text-white'}`}>
-              {stale ? `Stale (${staleSeconds}s)` : 'Fresh'}
-            </span>
+            <h3 className="text-lg font-bold text-white">Computer Vision Data</h3>
+            <span className="rounded-full bg-teal-700 px-3 py-1 text-xs font-semibold text-white">Pipeline B</span>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <MetricCard label="Steps" value={disp(metrics.steps)} accent="good" />
-            <MetricCard label="Fall Suspected" value={metrics.fallSuspected ? 'YES' : 'NO'} accent={metrics.fallSuspected ? 'danger' : 'good'} />
-            <MetricCard label="Tilt Deg" value={disp(metrics.tiltDeg)} accent={Number(metrics.tiltDeg || 0) > 25 ? 'warn' : 'normal'} />
+            <MetricCard label="Fall Suspected" value={Boolean(vision.fallSuspected ?? metrics.fallSuspected) ? 'YES' : 'NO'} accent={Boolean(vision.fallSuspected ?? metrics.fallSuspected) ? 'danger' : 'good'} />
             <MetricCard label="Cadence SPM" value={disp(vision.cadenceSpm)} />
             <MetricCard label="Step Var" value={disp(vision.stepVar)} />
-            <MetricCard label="Reliance" value={disp(metrics.reliance)} />
-            <MetricCard label="Balance" value={disp(metrics.balance)} />
+            <MetricCard label="Vision TS" value={disp(vision.ts)} />
+            <MetricCard label="Resident" value={String(vision.residentId || activeResidentId)} />
+            <MetricCard label="Source Camera" value={String(vision.cameraId || '-')} />
           </div>
-
-          <div className="mt-4 rounded-xl bg-slate-950 p-3 text-xs text-slate-300">
-            <p>Last walker ts: {formatTs(lastWalkerTsByResidentId[activeResidentId])}</p>
-            <p>Last vision ts: {formatTs(lastVisionTsByResidentId[activeResidentId])}</p>
-            <p>Last merged ts: {formatTs(lastMergedTsByResidentId[activeResidentId])}</p>
-          </div>
+          <pre className="mt-3 max-h-[240px] overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-200">{visionJson}</pre>
         </div>
       </div>
 
