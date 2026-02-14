@@ -1,9 +1,9 @@
 # SmartWalker Frontend
 
-Mode-based demo frontend for Smart Assistive Walker, optimized for:
-- Judge Mode (elder-friendly, iPad-mounted)
-- Debug Mode (engineer integration console)
-- Standalone CV window (`/cv`)
+Judge-ready frontend for Smart Assistive Walker with:
+- Grandma View (iPad-first, minimal)
+- Proof View (Live Signals + Clinical Value)
+- Admin drawer (resident, settings, demo mode)
 
 ## Install and Run
 
@@ -36,7 +36,7 @@ Default fallback: `http://localhost:8000`
 
 ## Routes
 
-- `/` mode switch UI (Judge default, Debug one click away)
+- `/` Grandma View by default, Proof View one tap away
 - `/cv` standalone CV window (independent websocket)
 
 ## Resilience and Fallbacks
@@ -46,21 +46,15 @@ Default fallback: `http://localhost:8000`
 - Agent failures fallback to local manual response text.
 - If backend is unreachable, app enters mock-data mode to remain demoable.
 
-## Mode Summary
+## Demo Layout
 
-- **Judge Mode**
-  - Start/Stop walk flow
-  - Huge step count and safety banner
-  - Minimal key metrics
-  - Coach panel (HeyGen + speech fallback)
-- **Debug Mode**
-  - Camera placeholder + open CV window
-  - Grouped metric cards
-  - Event log table
-  - Raw merged JSON with copy
-  - Staleness indicators and timestamps
-- **Debug Drawer (both modes)**
-  - API/WS URLs + status
-  - Last walker/vision/merged timestamps
-  - Test packet buttons
-  - Simulate fall toggle
+- **Grandma View**
+  - Idle + Walking states with large controls
+  - Safety banner + three key metrics
+  - Coach card (Play Coach + Talk to Coach)
+- **Proof View**
+  - Live Signals: walker + vision columns, freshness, event log, raw JSON
+  - Clinical Value: documents upload/list/preview and daily reports
+- **Admin Drawer**
+  - Hidden from judges by default
+  - Resident selection, API/WS status, settings access, demo packet simulation toggle
