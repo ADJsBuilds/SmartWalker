@@ -42,7 +42,6 @@ export class LiveAgentController {
           // Attach remote audio so avatar voice is audible in Judge mode.
           const audioEl = track.attach() as HTMLAudioElement;
           audioEl.autoplay = true;
-          audioEl.playsInline = true;
           audioEl.muted = false;
           audioEl.style.display = 'none';
           const host = mediaElement.parentElement ?? document.body;
