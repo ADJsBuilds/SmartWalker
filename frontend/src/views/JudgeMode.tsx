@@ -20,6 +20,9 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   const [isListening, setListening] = useState(false);
   const [liveAgentStatus, setLiveAgentStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'>('idle');
   const [liveAgentTranscript, setLiveAgentTranscript] = useState<string>('');
+  const [liteSessionId, setLiteSessionId] = useState('');
+  const [liteSpeakText, setLiteSpeakText] = useState('Hello from ElevenLabs on SmartWalker.');
+  const [liteSpeakBusy, setLiteSpeakBusy] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const coachVideoRef = useRef<HTMLVideoElement | null>(null);
   const liveAgentRef = useRef<LiveAgentController | null>(null);
@@ -179,6 +182,36 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
     }
   };
 
+  const speakViaElevenLabs = async () => {
+    const sessionId = liteSessionId.trim();
+    const text = liteSpeakText.trim();
+    if (!sessionId) {
+      notify('Enter a LITE session ID first.', 'warn');
+      return;
+    }
+    if (!text) {
+      notify('Enter text to synthesize.', 'warn');
+      return;
+    }
+    try {
+      setLiteSpeakBusy(true);
+      const result = await apiClient.sendLiveAvatarLiteSpeakText({
+        session_id: sessionId,
+        text,
+        interrupt_before_speak: true,
+      });
+      if (!result.ok) {
+        notify(result.error || 'ElevenLabs speech request failed.', 'warn');
+        return;
+      }
+      notify('ElevenLabs speech request sent.', 'info');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'ElevenLabs speech request failed.', 'warn');
+    } finally {
+      setLiteSpeakBusy(false);
+    }
+  };
+
   return (
     <section className="space-y-4 pb-28">
       <div className="rounded-2xl bg-slate-900 p-4 sm:p-6">
@@ -263,6 +296,28 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
             <button type="button" onClick={() => playCoach(coachText)} className="w-full rounded-xl bg-sky-600 px-4 py-3 text-lg font-black text-white">
               Play Coach
             </button>
+            <div className="rounded-xl border border-slate-700 bg-slate-950 p-3">
+              <p className="text-xs font-semibold text-slate-300">ElevenLabs LITE Test (main page)</p>
+              <input
+                value={liteSessionId}
+                onChange={(event) => setLiteSessionId(event.target.value)}
+                placeholder="Paste active LITE session_id"
+                className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              />
+              <textarea
+                value={liteSpeakText}
+                onChange={(event) => setLiteSpeakText(event.target.value)}
+                className="mt-2 h-20 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              />
+              <button
+                type="button"
+                disabled={liteSpeakBusy}
+                onClick={speakViaElevenLabs}
+                className="mt-2 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {liteSpeakBusy ? 'Sending...' : 'Speak Text (ElevenLabs)'}
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3">

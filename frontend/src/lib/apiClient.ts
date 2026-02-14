@@ -221,6 +221,16 @@ export class ApiClient {
   sendLiveAvatarLiteTestTone(payload: { session_id: string; duration_seconds?: number; frequency_hz?: number }): Promise<{ ok: boolean; error?: string }> {
     return this.request('/api/liveavatar/lite/test-tone', { method: 'POST', body: JSON.stringify(payload) });
   }
+
+  sendLiveAvatarLiteSpeakText(payload: {
+    session_id: string;
+    text: string;
+    voice_id?: string;
+    model_id?: string;
+    interrupt_before_speak?: boolean;
+  }): Promise<{ ok: boolean; error?: string }> {
+    return this.request('/api/liveavatar/lite/speak-text', { method: 'POST', body: JSON.stringify(payload) });
+  }
 }
 
 function safeJsonParse(text: string): unknown {
