@@ -182,7 +182,7 @@ function ClinicianPanel() {
 
   const generateReport = async () => {
     try {
-      const reportId = await apiClient.generateDailyReport(activeResidentId, date, usePlaceholderData);
+      const reportId = await apiClient.generateDailyReport(activeResidentId, date);
       if (reportId) {
         const cacheBust = `ts=${Date.now()}`;
         setReportUrl(`${apiClient.getDailyReportDownloadUrl(reportId)}?${cacheBust}`);
