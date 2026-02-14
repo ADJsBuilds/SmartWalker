@@ -57,7 +57,26 @@ class LiveAgentClient:
                     response = await client.post(url, json=payload, headers=self._headers())
                     response.raise_for_status()
                     raw = response.json()
-                    token = _extract_first_string(raw, {'session_access_token', 'sessionAccessToken', 'token', 'access_token'})
+                    # LiveAvatar commonly returns envelope shape:
+                    # { "code": 1000, "data": { "session_id": "...", "session_token": "..." }, ... }
+                    if isinstance(raw, dict) and isinstance(raw.get('data'), dict):
+                        data = raw.get('data') or {}
+                        if data.get('session_token') and not raw.get('session_token'):
+                            raw['session_token'] = data.get('session_token')
+                        if data.get('session_id') and not raw.get('session_id'):
+                            raw['session_id'] = data.get('session_id')
+
+                    token = _extract_first_string(
+                        raw,
+                        {
+                            'session_access_token',
+                            'sessionAccessToken',
+                            'session_token',
+                            'sessionToken',
+                            'token',
+                            'access_token',
+                        },
+                    )
                     session_id = _extract_first_string(raw, {'session_id', 'sessionId'})
                     return {
                         'ok': bool(token),
