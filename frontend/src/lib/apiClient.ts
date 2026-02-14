@@ -4,6 +4,7 @@ import type {
   CoachScriptRequest,
   CoachScriptResponse,
   DocumentDetails,
+  ExerciseSuggestionsResponse,
   HeyGenResponse,
   LiveAgentSessionEventResponse,
   LiveAgentSessionBootstrapResponse,
@@ -14,6 +15,7 @@ import type {
   LiveAvatarLiteStartResponse,
   LiveAvatarLiteStopResponse,
   MergedState,
+  ReportStatsResponse,
   Resident,
   ResidentDocument,
   ZoomInviteResponse,
@@ -132,6 +134,16 @@ export class ApiClient {
 
   getDailyReportDownloadUrl(reportId: string): string {
     return `${this.baseUrl}/api/reports/daily/${encodeURIComponent(reportId)}/download`;
+  }
+
+  getReportStats(residentId: string, days: number = 7): Promise<ReportStatsResponse> {
+    const params = new URLSearchParams({ residentId, days: String(days) });
+    return this.request(`/api/reports/stats?${params}`, { method: 'GET' });
+  }
+
+  getExerciseSuggestions(residentId: string, days: number = 7): Promise<ExerciseSuggestionsResponse> {
+    const params = new URLSearchParams({ residentId, days: String(days) });
+    return this.request(`/api/suggestions/exercise-regimen?${params}`, { method: 'GET' });
   }
 
   askAgent(payload: { residentId: string; question: string; conversationId?: string }): Promise<AgentAskResponse> {

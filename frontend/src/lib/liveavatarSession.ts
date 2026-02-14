@@ -1,4 +1,4 @@
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication } from 'livekit-client';
 import type { ApiClient } from './apiClient';
 
 export type LiteUiState = 'idle' | 'starting session...' | 'connecting livekit...' | 'connected' | 'ws connecting...' | 'ready' | 'error';
@@ -97,21 +97,26 @@ export class LiveAvatarLiteSessionManager {
   private async connectLiveKit(livekitUrl: string, livekitClientToken: string, videoHost: HTMLElement): Promise<void> {
     const room = new Room();
     this.room = room;
-    room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
-      this.callbacks.onLog?.(`Track subscribed: ${track.kind} (${participant.identity})`);
-      const element = track.attach();
-      if (track.kind === Track.Kind.Video) {
-        element.className = 'h-full w-full rounded-xl object-cover bg-black';
-      } else {
-        element.className = 'hidden';
-        const audioEl = element as HTMLAudioElement;
-        audioEl.autoplay = true;
-        audioEl.muted = false;
-        void audioEl.play().catch(() => this.callbacks.onError?.('Audio autoplay blocked. Tap the screen and retry.'));
-      }
-      videoHost.appendChild(element);
-    });
-    room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
+    room.on(
+      RoomEvent.TrackSubscribed,
+      (track: RemoteTrack, _publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        this.callbacks.onLog?.(`Track subscribed: ${track.kind} (${participant.identity})`);
+        const element = track.attach();
+        if (track.kind === Track.Kind.Video) {
+          element.className = 'h-full w-full rounded-xl object-cover bg-black';
+        } else {
+          element.className = 'hidden';
+          const audioEl = element as HTMLAudioElement;
+          audioEl.autoplay = true;
+          audioEl.muted = false;
+          void audioEl.play().catch(() => this.callbacks.onError?.('Audio autoplay blocked. Tap the screen and retry.'));
+        }
+        videoHost.appendChild(element);
+      },
+    );
+    room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) =>
+      track.detach().forEach((el: HTMLMediaElement) => el.remove()),
+    );
     room.on(RoomEvent.Disconnected, () => this.callbacks.onLog?.('LiveKit disconnected.'));
     await room.connect(livekitUrl, livekitClientToken);
   }

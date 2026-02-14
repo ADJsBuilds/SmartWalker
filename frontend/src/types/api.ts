@@ -1,6 +1,6 @@
 export type ApiStatus = 'connected' | 'degraded' | 'offline';
 export type WsStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
-export type AppMode = 'judge' | 'debug' | 'clinician' | 'carier';
+export type AppMode = 'judge' | 'debug' | 'clinician' | 'carier' | 'liveExercise' | 'patientHome' | 'doctorView';
 
 export type Maybe<T> = T | null;
 
@@ -185,4 +185,46 @@ export interface ApiErrorShape {
   status: number;
   message: string;
   details?: unknown;
+}
+
+export interface DailyStatsItem {
+  date: string;
+  samples: number;
+  steps: number;
+  cadenceSpm_avg?: number | null;
+  stepVar_avg?: number | null;
+  fallSuspected_count: number;
+  tilt_spikes: number;
+  heavy_lean_count?: number;
+  inactivity_count?: number;
+  active_seconds?: number;
+}
+
+export interface ReportStatsResponse {
+  residentId: string;
+  windowDays: number;
+  daily: DailyStatsItem[];
+  hourly: Array<{
+    bucketStartTs: number;
+    samples: number;
+    steps: number;
+    cadenceSpm_avg?: number | null;
+    stepVar_avg?: number | null;
+    fallSuspected_count: number;
+    tilt_spikes: number;
+    heavy_lean_count?: number;
+    inactivity_count?: number;
+    active_seconds?: number;
+  }>;
+  events: Array<{
+    id: string;
+    ts: number;
+    eventType: string;
+    severity: string;
+    payload: Record<string, unknown>;
+  }>;
+}
+
+export interface ExerciseSuggestionsResponse {
+  suggestions: string[];
 }

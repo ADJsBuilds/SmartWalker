@@ -1,4 +1,4 @@
-import { LocalAudioTrack, Room, RoomEvent, createLocalAudioTrack } from 'livekit-client';
+import { LocalAudioTrack, Room, RoomEvent, createLocalAudioTrack, type RemoteTrack } from 'livekit-client';
 import type { ApiClient } from './apiClient';
 
 export interface LiveAgentEventHandlers {
@@ -33,7 +33,7 @@ export class LiveAgentController {
       this.room = room;
       room.on(RoomEvent.Connected, () => handlers.onStatus?.('connected'));
       room.on(RoomEvent.Disconnected, () => handlers.onStatus?.('disconnected'));
-      room.on(RoomEvent.TrackSubscribed, (track) => {
+      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
         if (track.kind === 'video') {
           track.attach(mediaElement);
           return;
@@ -48,7 +48,9 @@ export class LiveAgentController {
           host.appendChild(audioEl);
         }
       });
-      room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
+      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) =>
+        track.detach().forEach((el: HTMLMediaElement) => el.remove()),
+      );
       await room.connect(livekitUrl, livekitClientToken);
       this.sessionId = sessionContext?.sessionId || null;
       this.sessionAccessToken = sessionContext?.sessionAccessToken || null;

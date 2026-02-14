@@ -63,6 +63,19 @@ def _extract_json_object(raw: str) -> Optional[str]:
     return text[start : end + 1]
 
 
+def _extract_json_array(raw: str) -> Optional[str]:
+    text = (raw or '').strip()
+    if not text:
+        return None
+    if text.startswith('```'):
+        text = text.replace('```json', '').replace('```', '').strip()
+    start = text.find('[')
+    end = text.rfind(']')
+    if start == -1 or end == -1 or end <= start:
+        return None
+    return text[start : end + 1]
+
+
 def build_deterministic_narrative(
     *,
     resident_id: str,
@@ -237,4 +250,35 @@ class GeminiClient:
             return None
         except Exception as exc:
             logger.warning('Gemini narrative generation failed: %s', exc)
+            return None
+
+    def generate_exercise_suggestions(self, stats_summary: str, days: int = 7) -> Optional[List[str]]:
+        """Given a text summary of resident walker/vision stats, return 3-5 exercise regimen suggestions."""
+        if not self._enabled():
+            return None
+
+        prompt = (
+            "You are a physical therapy assistant. Given this resident's walker and vision stats over the last "
+            f"{days} days, suggest 3 to 5 concise exercise regimen changes or goals. "
+            "Examples: increase walking duration, focus on balance, reduce tilt, improve cadence consistency. "
+            "Do not diagnose or recommend medications. Keep each suggestion to one short sentence. "
+            "Return ONLY a JSON array of strings, e.g. [\"Suggestion 1\", \"Suggestion 2\"].\n\n"
+            f"STATS SUMMARY:\n{stats_summary}"
+        )
+        try:
+            raw_text = self._call_gemini(prompt)
+            json_blob = _extract_json_object(raw_text or '') or _extract_json_array(raw_text or '')
+            if not json_blob:
+                return None
+            data = json.loads(json_blob)
+            if isinstance(data, list) and all(isinstance(x, str) for x in data):
+                return data[:5]
+            if isinstance(data, dict) and 'suggestions' in data and isinstance(data['suggestions'], list):
+                return [str(s) for s in data['suggestions'] if isinstance(s, str)][:5]
+            return None
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning('Gemini exercise suggestions parse failed: %s', exc)
+            return None
+        except Exception as exc:
+            logger.warning('Gemini exercise suggestions failed: %s', exc)
             return None
