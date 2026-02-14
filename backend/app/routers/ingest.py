@@ -3,7 +3,7 @@ import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db.models import MetricSample, Resident
@@ -18,22 +18,26 @@ _PERSIST_INTERVAL_SECONDS = 5
 
 
 class WalkerPacket(BaseModel):
-    residentId: str
-    deviceId: Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, extra='ignore')
+
+    residentId: str = Field(validation_alias=AliasChoices('residentId', 'resident_id'))
+    deviceId: Optional[str] = Field(default=None, validation_alias=AliasChoices('deviceId', 'device_id'))
     ts: Optional[int] = None
-    fsrLeft: int
-    fsrRight: int
-    tiltDeg: Optional[float] = None
+    fsrLeft: int = Field(validation_alias=AliasChoices('fsrLeft', 'fsr_left'))
+    fsrRight: int = Field(validation_alias=AliasChoices('fsrRight', 'fsr_right'))
+    tiltDeg: Optional[float] = Field(default=None, validation_alias=AliasChoices('tiltDeg', 'tilt_deg'))
     steps: Optional[int] = None
 
 
 class VisionPacket(BaseModel):
-    residentId: str
-    cameraId: Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, extra='ignore')
+
+    residentId: str = Field(validation_alias=AliasChoices('residentId', 'resident_id'))
+    cameraId: Optional[str] = Field(default=None, validation_alias=AliasChoices('cameraId', 'camera_id'))
     ts: Optional[int] = None
-    fallSuspected: bool = False
-    cadenceSpm: Optional[float] = None
-    stepVar: Optional[float] = None
+    fallSuspected: bool = Field(default=False, validation_alias=AliasChoices('fallSuspected', 'fall_suspected'))
+    cadenceSpm: Optional[float] = Field(default=None, validation_alias=AliasChoices('cadenceSpm', 'cadence_spm'))
+    stepVar: Optional[float] = Field(default=None, validation_alias=AliasChoices('stepVar', 'step_var'))
 
 
 async def _update_and_push(resident_id: str, db: Session) -> None:
