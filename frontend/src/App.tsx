@@ -1,31 +1,14 @@
-import { useEffect, useState } from 'react';
-import { AdminDrawer } from './components/AdminDrawer';
+import { useState } from 'react';
 import { SettingsModal } from './components/layout/SettingsModal';
 import { Toasts } from './components/layout/Toasts';
 import { useRealtimeState } from './store/realtimeState';
-import { GrandmaView } from './views/GrandmaView';
-import { ProofView } from './views/ProofView';
+import { DebugMode } from './views/DebugMode';
+import { JudgeMode } from './views/JudgeMode';
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [view, setView] = useState<'grandma' | 'proof'>('grandma');
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
-  const { latestMergedByResidentId, activeResidentId, mockMode, sendTestVisionPacket, sendTestWalkerPacket } = useRealtimeState();
+  const { latestMergedByResidentId, activeResidentId, mockMode, mode, setMode } = useRealtimeState();
   const selectedMerged = latestMergedByResidentId[activeResidentId];
-
-  useEffect(() => {
-    let timer: number | null = null;
-    if (demoMode) {
-      timer = window.setInterval(() => {
-        sendTestWalkerPacket();
-        sendTestVisionPacket();
-      }, 2500);
-    }
-    return () => {
-      if (timer) window.clearInterval(timer);
-    };
-  }, [demoMode, sendTestVisionPacket, sendTestWalkerPacket]);
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-white sm:p-5">
@@ -35,21 +18,21 @@ export function App() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setView('grandma')}
-              className={`rounded-xl px-4 py-2 text-sm font-bold ${view === 'grandma' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-200'}`}
+              onClick={() => setMode('judge')}
+              className={`rounded-xl px-4 py-2 text-sm font-bold ${mode === 'judge' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-200'}`}
             >
-              Grandma View
+              Judge Mode
             </button>
             <button
               type="button"
-              onClick={() => setView('proof')}
-              className={`rounded-xl px-4 py-2 text-sm font-bold ${view === 'proof' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-200'}`}
+              onClick={() => setMode('debug')}
+              className={`rounded-xl px-4 py-2 text-sm font-bold ${mode === 'debug' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-200'}`}
             >
-              Proof View
+              Debug Mode
             </button>
           </div>
-          <button type="button" onClick={() => setAdminOpen(true)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white">
-            Admin
+          <button type="button" onClick={() => setSettingsOpen(true)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white">
+            Settings
           </button>
         </header>
 
@@ -61,15 +44,8 @@ export function App() {
           </div>
         ) : null}
 
-        {view === 'grandma' ? <GrandmaView mergedState={selectedMerged} /> : <ProofView mergedState={selectedMerged} />}
+        {mode === 'debug' ? <DebugMode mergedState={selectedMerged} /> : <JudgeMode mergedState={selectedMerged} />}
       </div>
-      <AdminDrawer
-        open={adminOpen}
-        onClose={() => setAdminOpen(false)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        demoMode={demoMode}
-        onToggleDemoMode={setDemoMode}
-      />
     </main>
   );
 }
