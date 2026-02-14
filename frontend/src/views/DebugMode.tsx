@@ -48,7 +48,10 @@ export function DebugMode({ mergedState }: DebugModeProps) {
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="rounded-2xl bg-slate-900 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white">Sensor Data (Walker)</h3>
+            <div>
+              <h3 className="text-lg font-bold text-white">Sensor Data (Walker)</h3>
+              <p className="mt-1 text-xs text-slate-400">Last update: {formatRelativeTime(mergedState?.ts)}</p>
+            </div>
             <span className="rounded-full bg-indigo-700 px-3 py-1 text-xs font-semibold text-white">Pipeline A</span>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -56,15 +59,20 @@ export function DebugMode({ mergedState }: DebugModeProps) {
             <MetricCard label="FSR Right" value={disp(walker.fsrRight)} />
             <MetricCard label="Steps (Camera)" value={disp(vision.stepCount ?? metrics.steps ?? walker.steps)} accent="good" />
             <MetricCard label="Tilt Deg" value={disp(walker.tiltDeg ?? metrics.tiltDeg)} accent={Number(walker.tiltDeg ?? metrics.tiltDeg ?? 0) > 25 ? 'warn' : 'normal'} />
-            <MetricCard label="Reliance" value={disp(metrics.reliance)} />
-            <MetricCard label="Balance" value={disp(metrics.balance)} />
+            <MetricCard label="Reliance (Load)" value={disp(metrics.reliance)} />
+            <MetricCard label="Balance (L/R)" value={formatBalance(walker.fsrLeft, walker.fsrRight)} />
+            <MetricCard label="Step Source" value={formatStepSource(vision, walker)} />
+            <MetricCard label="Motion (IMU)" value={formatMotion(walker)} />
           </div>
           <pre className="mt-3 max-h-[240px] overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-200">{walkerJson}</pre>
         </div>
 
         <div className="rounded-2xl bg-slate-900 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white">Computer Vision Data</h3>
+            <div>
+              <h3 className="text-lg font-bold text-white">Computer Vision Data</h3>
+              <p className="mt-1 text-xs text-slate-400">Last update: {formatRelativeTime(mergedState?.ts)}</p>
+            </div>
             <span className="rounded-full bg-teal-700 px-3 py-1 text-xs font-semibold text-white">Pipeline B</span>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -72,9 +80,10 @@ export function DebugMode({ mergedState }: DebugModeProps) {
             <MetricCard label="Cadence SPM" value={disp(vision.cadenceSpm)} />
             <MetricCard label="Step Var" value={disp(vision.stepVar)} />
             <MetricCard label="Confidence" value={disp(vision.confidence)} />
-            <MetricCard label="Person Detected" value={vision.personDetected === undefined ? '-' : vision.personDetected ? 'YES' : 'NO'} />
-            <MetricCard label="Inference (ms)" value={disp(vision.inferenceMs)} />
-            <MetricCard label="Source FPS" value={disp(vision.sourceFps)} />
+            <MetricCard label="Person Detected" value={vision.personDetected === undefined ? '-' : vision.personDetected ? 'YES' : 'NO'} accent={vision.personDetected ? 'good' : 'normal'} />
+            <MetricCard label="Step Count (Vision)" value={disp(vision.stepCount)} />
+            <MetricCard label="Inference Latency" value={formatInferenceMs(vision.inferenceMs)} />
+            <MetricCard label="Camera FPS" value={formatFps(vision.sourceFps)} />
             <MetricCard label="Vision TS" value={disp(vision.ts)} />
             <MetricCard label="Resident" value={String(vision.residentId || activeResidentId)} />
             <MetricCard label="Source Camera" value={String(vision.cameraId || '-')} />
@@ -225,4 +234,66 @@ function disp(v: unknown): string {
 function formatTs(ts: number | undefined): string {
   if (!ts) return '-';
   return new Date(ts * 1000).toLocaleTimeString();
+}
+
+function formatRelativeTime(ts: number | undefined): string {
+  if (!ts) return '–';
+  const secondsAgo = Math.floor((Date.now() / 1000 - ts));
+  if (secondsAgo < 0) return 'now';
+  if (secondsAgo < 60) return `${secondsAgo}s ago`;
+  const minutesAgo = Math.floor(secondsAgo / 60);
+  if (minutesAgo < 60) return `${minutesAgo}m ago`;
+  const hoursAgo = Math.floor(minutesAgo / 60);
+  return `${hoursAgo}h ago`;
+}
+
+function formatBalance(fsrLeft: unknown, fsrRight: unknown): string {
+  const left = Number(fsrLeft) || 0;
+  const right = Number(fsrRight) || 0;
+  const total = left + right;
+  if (total === 0) return '–';
+  const leftPct = Math.round((left / total) * 100);
+  const rightPct = Math.round((right / total) * 100);
+  return `${leftPct}% / ${rightPct}%`;
+}
+
+function formatStepSource(vision: Record<string, unknown>, walker: Record<string, unknown>): string {
+  const visionStepCount = vision.stepCount;
+  const personDetected = vision.personDetected;
+  if (visionStepCount !== undefined && visionStepCount !== null && personDetected === true) {
+    return 'VISION';
+  }
+  if (walker.steps !== undefined && walker.steps !== null) {
+    return 'WALKER';
+  }
+  return '–';
+}
+
+function formatMotion(walker: Record<string, unknown>): string {
+  const hasAccel = walker.accelX !== undefined || walker.accelY !== undefined || walker.accelZ !== undefined;
+  const hasGyro = walker.gyroX !== undefined || walker.gyroY !== undefined || walker.gyroZ !== undefined;
+  
+  if (hasAccel || hasGyro) {
+    const ax = Number(walker.accelX) || 0;
+    const ay = Number(walker.accelY) || 0;
+    const az = Number(walker.accelZ) || 0;
+    if (hasAccel && (ax !== 0 || ay !== 0 || az !== 0)) {
+      const mag = Math.sqrt(ax * ax + ay * ay + az * az);
+      return `IMU OK (${mag.toFixed(1)})`;
+    }
+    return 'IMU OK';
+  }
+  return '–';
+}
+
+function formatInferenceMs(ms: unknown): string {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return '–';
+  return `${Math.round(n)}ms`;
+}
+
+function formatFps(fps: unknown): string {
+  const n = Number(fps);
+  if (!Number.isFinite(n)) return '–';
+  return `${n.toFixed(1)} fps`;
 }
