@@ -12,6 +12,7 @@ import type {
   MergedState,
   Resident,
   ResidentDocument,
+  ZoomInviteResponse,
 } from '../types/api';
 
 export class ApiError extends Error {
@@ -167,6 +168,10 @@ export class ApiClient {
 
   sendLiveAgentSessionEvent(payload: { sessionToken: string; sessionId: string; text: string }): Promise<LiveAgentSessionEventResponse> {
     return this.request('/api/liveagent/session/event', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  requestZoomInvite(payload: { contactLabel?: string; phrase?: string }): Promise<ZoomInviteResponse> {
+    return this.request('/api/carrier/zoom-invite', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 

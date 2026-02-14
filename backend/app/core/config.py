@@ -45,6 +45,30 @@ class Settings(BaseSettings):
     cors_allow_origins: List[str] = ['*']
     log_level: str = 'INFO'
 
+    # Carrier mode: Zoom + email invites
+    zoom_account_id: str = ''
+    zoom_client_id: str = ''
+    zoom_client_secret: str = ''
+    zoom_secret_token: str = ''
+    carrier_email_from: str = ''
+    carrier_email_app_password: str = ''
+    carrier_contacts: str = '{}'
+
+    @field_validator('carrier_contacts', mode='before')
+    @classmethod
+    def parse_carrier_contacts(cls, value):
+        if value is None or value == '':
+            return '{}'
+        if isinstance(value, str):
+            try:
+                obj = json.loads(value)
+                if isinstance(obj, dict):
+                    return json.dumps({str(k).strip().lower(): str(v).strip() for k, v in obj.items()})
+            except json.JSONDecodeError:
+                pass
+            return value
+        return '{}'
+
     @field_validator('cors_allow_origins', mode='before')
     @classmethod
     def parse_origins(cls, value):

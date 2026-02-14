@@ -136,6 +136,12 @@ export interface CoachScriptResponse {
   reason: string;
 }
 
+export interface ZoomInviteResponse {
+  ok: boolean;
+  joinUrl: string;
+  sentTo: string;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;
