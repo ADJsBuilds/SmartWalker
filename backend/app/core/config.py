@@ -18,12 +18,19 @@ class Settings(BaseSettings):
     database_url: str = 'sqlite:///./data/app.db'
     storage_dir: str = './data'
     heygen_api_key: str = ''
+    liveagent_api_key: str = ''
     openevidence_api_key: str = ''
     openevidence_base_url: str = ''
     heygen_base_url: str = ''
+    liveagent_base_url: str = 'https://api.heygen.com'
     heygen_avatar_id: str = ''  # HeyGen avatar ID (required for avatar generation)
     heygen_voice_id: str = ''  # Optional: specific voice ID, otherwise uses avatar default
     heygen_mode: str = 'video'  # 'video' for video generation, 'streaming' for real-time streaming
+    liveagent_avatar_id: str = ''
+    liveagent_voice_id: str = ''
+    liveagent_language: str = 'en'
+    liveagent_interactivity_type: str = 'PUSH_TO_TALK'
+    liveagent_is_sandbox: bool = False
     cors_allow_origins: List[str] = ['*']
     log_level: str = 'INFO'
 

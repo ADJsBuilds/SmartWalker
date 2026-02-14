@@ -55,6 +55,13 @@ Set environment variables in Render dashboard:
 - `HEYGEN_AVATAR_ID` (required - your HeyGen avatar ID)
 - `HEYGEN_VOICE_ID` (optional - specific voice, otherwise uses avatar default)
 - `HEYGEN_MODE` (optional - `video` or `streaming`, default: `video`)
+- `LIVEAGENT_API_KEY` (preferred for LiveAgent, falls back to `HEYGEN_API_KEY`)
+- `LIVEAGENT_BASE_URL` (default: `https://api.heygen.com`)
+- `LIVEAGENT_AVATAR_ID` (required for `/api/liveagent/session/token`)
+- `LIVEAGENT_VOICE_ID` (optional)
+- `LIVEAGENT_LANGUAGE` (optional, default: `en`)
+- `LIVEAGENT_INTERACTIVITY_TYPE` (optional: `PUSH_TO_TALK` or `CONVERSATIONAL`)
+- `LIVEAGENT_IS_SANDBOX` (optional: `true`/`false`)
 - `OPENEVIDENCE_API_KEY`
 - `OPENEVIDENCE_BASE_URL`
 

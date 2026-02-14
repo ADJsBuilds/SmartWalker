@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MetricCard } from '../components/MetricCard';
 import { isNotImplementedError } from '../lib/apiClient';
+import { LiveAgentController } from '../lib/liveAgent';
 import { getSpeechRecognitionCtor, speakText, type SpeechRecognitionLike } from '../lib/speech';
 import { useRealtimeState } from '../store/realtimeState';
 import type { AgentAskResponse, MergedState } from '../types/api';
@@ -13,11 +14,14 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   const { activeResidentId, apiClient, notify } = useRealtimeState();
   const [isExercising, setIsExercising] = useState(false);
   const [coachText, setCoachText] = useState('Great posture. Keep a smooth pace and breathe steadily.');
-  const [coachVideoUrl, setCoachVideoUrl] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
   const [agentResponse, setAgentResponse] = useState<AgentAskResponse | null>(null);
   const [isListening, setListening] = useState(false);
+  const [liveAgentStatus, setLiveAgentStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'>('idle');
+  const [liveAgentTranscript, setLiveAgentTranscript] = useState<string>('');
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const coachVideoRef = useRef<HTMLVideoElement | null>(null);
+  const liveAgentRef = useRef<LiveAgentController | null>(null);
 
   const metrics = mergedState?.metrics || {};
   const vision = (mergedState?.vision || {}) as Record<string, unknown>;
@@ -30,21 +34,53 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
     return 'Excellent! Keep cadence steady and take small controlled steps.';
   }, [fall, isExercising]);
 
-  const playCoach = async (text: string) => {
-    setCoachVideoUrl(null);
-    try {
-      const result = await apiClient.heygenSpeak({ text, residentId: activeResidentId });
-      const maybeUrl = extractPlayableUrl(result);
-      if (maybeUrl) {
-        setCoachVideoUrl(maybeUrl);
-      } else {
-        speakText(text);
-        notify('HeyGen returned no media URL, using browser voice fallback.', 'warn');
-      }
-    } catch {
-      speakText(text);
-      notify('HeyGen unavailable, using browser voice fallback.', 'warn');
+  useEffect(() => {
+    liveAgentRef.current = new LiveAgentController();
+    return () => {
+      liveAgentRef.current?.disconnect();
+      liveAgentRef.current = null;
+    };
+  }, []);
+
+  const connectLiveAgent = async () => {
+    if (!coachVideoRef.current) {
+      notify('LiveAgent video element not ready yet.', 'warn');
+      return;
     }
+    try {
+      const tokenResult = await apiClient.createLiveAgentSessionToken({
+        residentId: activeResidentId,
+        interactivityType: 'PUSH_TO_TALK',
+      });
+      if (!tokenResult.ok || !tokenResult.sessionAccessToken) {
+        notify(tokenResult.error || 'Failed to create LiveAgent session token.', 'warn');
+        return;
+      }
+
+      await liveAgentRef.current?.connect(tokenResult.sessionAccessToken, coachVideoRef.current, {
+        onStatus: setLiveAgentStatus,
+        onAgentTranscript: (text, speaker) => setLiveAgentTranscript(`${speaker}: ${text}`),
+        onError: (message) => notify(message, 'warn'),
+      });
+      notify('LiveAgent connected.', 'info');
+    } catch {
+      notify('LiveAgent unavailable. Falling back to browser voice.', 'warn');
+      setLiveAgentStatus('error');
+    }
+  };
+
+  const disconnectLiveAgent = async () => {
+    await liveAgentRef.current?.disconnect();
+    setLiveAgentStatus('disconnected');
+  };
+
+  const playCoach = async (text: string) => {
+    if (liveAgentRef.current?.isConnected) {
+      liveAgentRef.current.speakText(text);
+      return;
+    }
+    speakText(text);
+    notify('LiveAgent not connected. Used browser voice fallback.', 'warn');
   };
 
   const startListening = () => {
@@ -73,7 +109,8 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
       const response = await apiClient.askAgent({ residentId: activeResidentId, question });
       setAgentResponse(response);
       const speakable = response.heygen?.textToSpeak || response.answer;
-      playCoach(speakable);
+      if (liveAgentRef.current?.isConnected) liveAgentRef.current.speakText(speakable);
+      else speakText(speakable);
     } catch (error) {
       const fallback = isNotImplementedError(error)
         ? { answer: `Coach fallback: ${question}. Keep going safely!`, citations: [] }
@@ -137,11 +174,27 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
         <div className="mt-3 grid gap-4 lg:grid-cols-2">
           <div className="space-y-3">
             <div className="flex min-h-[180px] items-center justify-center rounded-xl border-2 border-dashed border-slate-600 bg-slate-950">
-              {coachVideoUrl ? (
-                <video src={coachVideoUrl} controls autoPlay className="max-h-[220px] w-full rounded-lg" />
-              ) : (
-                <p className="text-sm text-slate-400">Reserved avatar/video playback area</p>
-              )}
+              <video ref={coachVideoRef} autoPlay playsInline controls muted={false} className="max-h-[220px] w-full rounded-lg bg-black" />
+            </div>
+            <p className="text-xs text-slate-300">LiveAgent status: <span className="font-bold">{liveAgentStatus}</span></p>
+            {liveAgentTranscript ? <p className="text-xs text-slate-400">Last transcript: {liveAgentTranscript}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={connectLiveAgent} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
+                Connect LiveAgent
+              </button>
+              <button type="button" onClick={disconnectLiveAgent} className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-bold text-white">
+                Disconnect
+              </button>
+              <button
+                type="button"
+                onMouseDown={() => liveAgentRef.current?.startListening()}
+                onMouseUp={() => liveAgentRef.current?.stopListening()}
+                onTouchStart={() => liveAgentRef.current?.startListening()}
+                onTouchEnd={() => liveAgentRef.current?.stopListening()}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white"
+              >
+                Hold to Talk
+              </button>
             </div>
             <textarea
               value={coachText}
@@ -194,33 +247,5 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
 function display(value: unknown): string {
   const n = Number(value);
   return Number.isFinite(n) ? String(Math.round(n * 100) / 100) : '-';
-}
-
-function extractPlayableUrl(response: unknown): string | null {
-  if (!response || typeof response !== 'object') return null;
-  const obj = response as Record<string, unknown>;
-  
-  // New format: direct video_url or url fields
-  if (typeof obj.video_url === 'string') return obj.video_url;
-  if (typeof obj.url === 'string') return obj.url;
-  
-  // Legacy format: nested in raw
-  if (obj.raw && typeof obj.raw === 'object') {
-    const nested = obj.raw as Record<string, unknown>;
-    if (typeof nested.url === 'string') return nested.url;
-    if (typeof nested.videoUrl === 'string') return nested.videoUrl;
-    if (typeof nested.video_url === 'string') return nested.video_url;
-    if (typeof nested.download_url === 'string') return nested.download_url;
-    
-    // Check nested data object
-    if (nested.data && typeof nested.data === 'object') {
-      const data = nested.data as Record<string, unknown>;
-      if (typeof data.url === 'string') return data.url;
-      if (typeof data.video_url === 'string') return data.video_url;
-      if (typeof data.download_url === 'string') return data.download_url;
-    }
-  }
-  
-  return null;
 }
 

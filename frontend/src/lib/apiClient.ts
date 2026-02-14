@@ -3,6 +3,7 @@ import type {
   ApiErrorShape,
   DocumentDetails,
   HeyGenResponse,
+  LiveAgentSessionTokenResponse,
   MergedState,
   Resident,
   ResidentDocument,
@@ -129,6 +130,17 @@ export class ApiClient {
 
   heygenSpeak(payload: { text: string; residentId?: string }): Promise<HeyGenResponse> {
     return this.request('/api/heygen/speak', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  createLiveAgentSessionToken(payload: {
+    residentId?: string;
+    avatarId?: string;
+    interactivityType?: 'CONVERSATIONAL' | 'PUSH_TO_TALK';
+    language?: string;
+    voiceId?: string;
+    isSandbox?: boolean;
+  }): Promise<LiveAgentSessionTokenResponse> {
+    return this.request('/api/liveagent/session/token', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 

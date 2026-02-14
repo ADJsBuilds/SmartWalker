@@ -73,6 +73,16 @@ export interface HeyGenResponse {
   detail?: string;
 }
 
+export interface LiveAgentSessionTokenResponse {
+  ok: boolean;
+  mode: string;
+  residentId?: string;
+  sessionAccessToken?: string;
+  sessionId?: string;
+  error?: string;
+  raw?: Record<string, unknown> | null;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;

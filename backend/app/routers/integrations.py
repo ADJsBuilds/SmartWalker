@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.services.heygen import HeyGenClient
+from app.services.liveagent import LiveAgentClient
 from app.services.openevidence import OpenEvidenceClient, normalize_openevidence
 
 router = APIRouter(tags=['integrations'])
@@ -36,6 +37,30 @@ class HeyGenSpeakResponse(BaseModel):
     providerStatus: Optional[str] = None
     error: Optional[str] = None
     raw: Optional[Dict[str, Any]] = None
+
+
+class LiveAgentSessionTokenPayload(BaseModel):
+    residentId: Optional[str] = None
+    avatarId: Optional[str] = None
+    mode: str = 'FULL'
+    interactivityType: Optional[str] = None  # CONVERSATIONAL or PUSH_TO_TALK
+    isSandbox: Optional[bool] = None
+    language: Optional[str] = None
+    voiceId: Optional[str] = None
+
+
+class LiveAgentSessionTokenResponse(BaseModel):
+    ok: bool
+    mode: str
+    residentId: Optional[str] = None
+    sessionAccessToken: Optional[str] = None
+    sessionId: Optional[str] = None
+    error: Optional[str] = None
+    raw: Optional[Dict[str, Any]] = None
+
+
+class LiveAgentStopPayload(BaseModel):
+    sessionId: str
 
 
 @router.post('/api/integrations/openevidence')
@@ -125,6 +150,84 @@ async def list_heygen_avatars():
     except Exception as exc:
         logger.error(f'Error fetching HeyGen avatars: {exc}', exc_info=True)
         raise HTTPException(status_code=502, detail=f'Failed to fetch avatars: {exc}')
+
+
+@router.post('/api/liveagent/session/token', response_model=LiveAgentSessionTokenResponse)
+async def create_liveagent_session_token(payload: LiveAgentSessionTokenPayload):
+    """
+    Create a LiveAgent FULL-mode session token for frontend SDK usage.
+
+    Based on LiveAvatar FULL mode:
+    - POST /v1/sessions/token
+    - frontend uses @heygen/liveavatar-web-sdk with returned sessionAccessToken.
+    """
+    client = LiveAgentClient()
+    settings = client.settings
+
+    avatar_id = payload.avatarId or settings.liveagent_avatar_id or settings.heygen_avatar_id
+    voice_id = payload.voiceId or settings.liveagent_voice_id or settings.heygen_voice_id
+    language = payload.language or settings.liveagent_language or 'en'
+    interactivity = payload.interactivityType or settings.liveagent_interactivity_type or 'PUSH_TO_TALK'
+    is_sandbox = settings.liveagent_is_sandbox if payload.isSandbox is None else payload.isSandbox
+
+    if not avatar_id:
+        return {
+            'ok': False,
+            'mode': 'fallback',
+            'residentId': payload.residentId,
+            'error': 'LIVEAGENT_AVATAR_ID (or HEYGEN_AVATAR_ID) not configured',
+            'raw': None,
+        }
+
+    provider_payload: Dict[str, Any] = {
+        'mode': payload.mode or 'FULL',
+        'avatar_id': avatar_id,
+        'is_sandbox': bool(is_sandbox),
+        'interactivity_type': interactivity,
+        'avatar_persona': {
+            'language': language,
+        },
+    }
+    if voice_id:
+        provider_payload['avatar_persona']['voice_id'] = voice_id
+
+    try:
+        result = await client.create_session_token(provider_payload)
+        if result.get('ok'):
+            return {
+                'ok': True,
+                'mode': 'liveagent',
+                'residentId': payload.residentId,
+                'sessionAccessToken': result.get('sessionAccessToken'),
+                'sessionId': result.get('sessionId'),
+                'raw': result.get('raw'),
+            }
+        return {
+            'ok': False,
+            'mode': 'fallback',
+            'residentId': payload.residentId,
+            'error': str(result.get('error') or 'Failed to create LiveAgent session token'),
+            'raw': result.get('raw'),
+        }
+    except Exception as exc:
+        logger.error(f'LiveAgent session token creation failed: {exc}', exc_info=True)
+        return {
+            'ok': False,
+            'mode': 'fallback',
+            'residentId': payload.residentId,
+            'error': str(exc),
+            'raw': None,
+        }
+
+
+@router.post('/api/liveagent/session/stop')
+async def stop_liveagent_session(payload: LiveAgentStopPayload):
+    client = LiveAgentClient()
+    try:
+        return await client.stop_session(payload.sessionId)
+    except Exception as exc:
+        logger.error(f'LiveAgent session stop failed: {exc}', exc_info=True)
+        raise HTTPException(status_code=502, detail=f'liveagent stop failed: {exc}')
 
 
 @router.post('/api/heygen/speak', response_model=HeyGenSpeakResponse)
