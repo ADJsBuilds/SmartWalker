@@ -78,6 +78,8 @@ async def _update_and_push(resident_id: str, db: Session) -> None:
 
     if not db.get(Resident, resident_id):
         db.add(Resident(id=resident_id, name=None))
+        # Ensure FK target exists before inserting rollups/events in this transaction.
+        db.flush()
 
     now = int(time.time())
     metrics = merged.get('metrics') or {}
