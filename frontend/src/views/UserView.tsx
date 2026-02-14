@@ -8,6 +8,7 @@ export function UserView() {
   const [status, setStatus] = useState<LiteUiState>('idle');
   const [errorText, setErrorText] = useState<string | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
+  const [speakText, setSpeakText] = useState('Hello! This is ElevenLabs TTS driving LiveAvatar LITE mode.');
   const videoHostRef = useRef<HTMLDivElement | null>(null);
 
   const sessionManager = useMemo(
@@ -48,10 +49,13 @@ export function UserView() {
       status={status}
       errorText={errorText}
       logLines={logLines}
+      speakText={speakText}
+      onSpeakTextChange={setSpeakText}
       videoHostRef={videoHostRef}
       onDisconnect={() => void sessionManager.stop()}
       onInterrupt={() => void sessionManager.interrupt()}
       onTestTone={() => void sessionManager.speakTestTone(1, 440)}
+      onSpeakText={() => void sessionManager.speakText(speakText)}
     />
   );
 }

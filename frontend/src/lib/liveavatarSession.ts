@@ -94,6 +94,18 @@ export class LiveAvatarLiteSessionManager {
     await this.apiClient.sendLiveAvatarLiteTestTone({ session_id: this.sessionId, duration_seconds: durationSeconds, frequency_hz: frequencyHz });
   }
 
+  async speakText(text: string): Promise<void> {
+    if (!this.sessionId || !text.trim()) return;
+    const result = await this.apiClient.sendLiveAvatarLiteSpeakText({
+      session_id: this.sessionId,
+      text: text.trim(),
+      interrupt_before_speak: true,
+    });
+    if (!result.ok) {
+      this.callbacks.onError?.(result.error || 'Failed to synthesize/send speech.');
+    }
+  }
+
   private async connectLiveKit(livekitUrl: string, livekitClientToken: string, videoHost: HTMLElement): Promise<void> {
     const room = new Room();
     this.room = room;

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.agents.lite_agent import lite_agent_manager
 from app.audio.pcm import generate_test_tone_pcm16le
 from app.core.config import get_settings
+from app.services.elevenlabs_tts import ElevenLabsTTSService
 from app.services.liveavatar_lite import LiveAvatarLiteClient
 
 router = APIRouter(tags=['liveavatar-lite'])
@@ -67,6 +68,14 @@ class LiteSpeakTonePayload(BaseModel):
     session_id: str
     duration_seconds: float = 1.0
     frequency_hz: float = 440.0
+
+
+class LiteSpeakTextPayload(BaseModel):
+    session_id: str
+    text: str
+    voice_id: Optional[str] = None
+    model_id: Optional[str] = None
+    interrupt_before_speak: bool = True
 
 
 @router.post('/api/liveavatar/lite/create', response_model=LiteCreateResponse)
@@ -178,4 +187,18 @@ async def keepalive_lite(payload: LiteSessionControlPayload):
 async def speak_test_tone(payload: LiteSpeakTonePayload):
     pcm = generate_test_tone_pcm16le(duration_seconds=payload.duration_seconds, frequency_hz=payload.frequency_hz)
     return await lite_agent_manager.speak_pcm(payload.session_id, pcm)
+
+
+@router.post('/api/liveavatar/lite/speak-text')
+async def speak_text_lite(payload: LiteSpeakTextPayload):
+    tts_result = await ElevenLabsTTSService().synthesize_pcm24(
+        text=payload.text,
+        voice_id=payload.voice_id,
+        model_id=payload.model_id,
+    )
+    if not tts_result.get('ok'):
+        return {'ok': False, 'error': str(tts_result.get('error') or 'TTS synthesis failed')}
+    if payload.interrupt_before_speak:
+        await lite_agent_manager.send_interrupt(payload.session_id)
+    return await lite_agent_manager.speak_pcm(payload.session_id, tts_result.get('pcm') or b'')
 
