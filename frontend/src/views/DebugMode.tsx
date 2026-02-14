@@ -71,6 +71,10 @@ export function DebugMode({ mergedState }: DebugModeProps) {
             <MetricCard label="Fall Suspected" value={Boolean(vision.fallSuspected ?? metrics.fallSuspected) ? 'YES' : 'NO'} accent={Boolean(vision.fallSuspected ?? metrics.fallSuspected) ? 'danger' : 'good'} />
             <MetricCard label="Cadence SPM" value={disp(vision.cadenceSpm)} />
             <MetricCard label="Step Var" value={disp(vision.stepVar)} />
+            <MetricCard label="Confidence" value={disp(vision.confidence)} />
+            <MetricCard label="Person Detected" value={vision.personDetected === undefined ? '-' : vision.personDetected ? 'YES' : 'NO'} />
+            <MetricCard label="Inference (ms)" value={disp(vision.inferenceMs)} />
+            <MetricCard label="Source FPS" value={disp(vision.sourceFps)} />
             <MetricCard label="Vision TS" value={disp(vision.ts)} />
             <MetricCard label="Resident" value={String(vision.residentId || activeResidentId)} />
             <MetricCard label="Source Camera" value={String(vision.cameraId || '-')} />

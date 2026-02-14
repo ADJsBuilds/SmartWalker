@@ -36,8 +36,29 @@ class VisionPacket(BaseModel):
     cameraId: Optional[str] = Field(default=None, validation_alias=AliasChoices('cameraId', 'camera_id'))
     ts: Optional[int] = None
     fallSuspected: bool = Field(default=False, validation_alias=AliasChoices('fallSuspected', 'fall_suspected'))
+    fallCount: Optional[int] = Field(default=None, validation_alias=AliasChoices('fallCount', 'fall_count'))
+    totalTimeOnGroundSeconds: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices('totalTimeOnGroundSeconds', 'total_time_on_ground_seconds')
+    )
+    postureState: Optional[str] = Field(default=None, validation_alias=AliasChoices('postureState', 'posture_state'))
+    stepCount: Optional[int] = Field(default=None, validation_alias=AliasChoices('stepCount', 'step_count'))
     cadenceSpm: Optional[float] = Field(default=None, validation_alias=AliasChoices('cadenceSpm', 'cadence_spm'))
+    avgCadenceSpm: Optional[float] = Field(default=None, validation_alias=AliasChoices('avgCadenceSpm', 'avg_cadence_spm'))
+    stepTimeCv: Optional[float] = Field(default=None, validation_alias=AliasChoices('stepTimeCv', 'step_time_cv'))
+    stepTimeMean: Optional[float] = Field(default=None, validation_alias=AliasChoices('stepTimeMean', 'step_time_mean'))
+    activityState: Optional[str] = Field(default=None, validation_alias=AliasChoices('activityState', 'activity_state'))
+    asymmetryIndex: Optional[float] = Field(default=None, validation_alias=AliasChoices('asymmetryIndex', 'asymmetry_index'))
+    fallRiskLevel: Optional[str] = Field(default=None, validation_alias=AliasChoices('fallRiskLevel', 'fall_risk_level'))
+    fallRiskScore: Optional[float] = Field(default=None, validation_alias=AliasChoices('fallRiskScore', 'fall_risk_score'))
+    fogStatus: Optional[str] = Field(default=None, validation_alias=AliasChoices('fogStatus', 'fog_status'))
+    fogEpisodes: Optional[int] = Field(default=None, validation_alias=AliasChoices('fogEpisodes', 'fog_episodes'))
+    fogDurationSeconds: Optional[float] = Field(default=None, validation_alias=AliasChoices('fogDurationSeconds', 'fog_duration_seconds'))
     stepVar: Optional[float] = Field(default=None, validation_alias=AliasChoices('stepVar', 'step_var'))
+    personDetected: Optional[bool] = Field(default=None, validation_alias=AliasChoices('personDetected', 'person_detected'))
+    confidence: Optional[float] = None
+    sourceFps: Optional[float] = Field(default=None, validation_alias=AliasChoices('sourceFps', 'source_fps'))
+    inferenceMs: Optional[float] = Field(default=None, validation_alias=AliasChoices('inferenceMs', 'inference_ms'))
+    frameId: Optional[str] = Field(default=None, validation_alias=AliasChoices('frameId', 'frame_id'))
 
 
 async def _update_and_push(resident_id: str, db: Session) -> None:
