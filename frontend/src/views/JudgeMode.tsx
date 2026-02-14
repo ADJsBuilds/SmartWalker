@@ -12,6 +12,7 @@ interface JudgeModeProps {
 
 export function JudgeMode({ mergedState }: JudgeModeProps) {
   const { activeResidentId, apiClient, notify } = useRealtimeState();
+  const liveAgentIntro = 'Good morning! I am your AI physical therapist to walk you through your exercises.';
   const [isExercising, setIsExercising] = useState(false);
   const [coachText, setCoachText] = useState('Great posture. Keep a smooth pace and breathe steadily.');
   const [prompt, setPrompt] = useState('');
@@ -67,7 +68,11 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
         sessionId: bootstrap.sessionId,
         sessionAccessToken: bootstrap.sessionAccessToken,
       });
+      const introPlayed = await liveAgentRef.current?.speakText(liveAgentIntro);
       notify('LiveAgent connected.', 'info');
+      if (!introPlayed) {
+        notify('LiveAgent connected, but intro speech did not play.', 'warn');
+      }
     } catch {
       notify('LiveAgent unavailable. Falling back to browser voice.', 'warn');
       setLiveAgentStatus('error');
