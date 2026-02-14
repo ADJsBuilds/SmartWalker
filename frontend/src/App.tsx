@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SettingsModal } from './components/layout/SettingsModal';
 import { Toasts } from './components/layout/Toasts';
 import { useRealtimeState } from './store/realtimeState';
+import { CarierMode } from './views/CarierMode';
 import { DebugMode } from './views/DebugMode';
 import { JudgeMode } from './views/JudgeMode';
 
@@ -30,6 +31,13 @@ export function App() {
             >
               Debug Mode
             </button>
+            <button
+              type="button"
+              onClick={() => setMode('carier')}
+              className={`rounded-xl px-4 py-2 text-sm font-bold ${mode === 'carier' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-200'}`}
+            >
+              Carier Mode
+            </button>
           </div>
           <button type="button" onClick={() => setSettingsOpen(true)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white">
             Settings
@@ -44,7 +52,13 @@ export function App() {
           </div>
         ) : null}
 
-        {mode === 'debug' ? <DebugMode mergedState={selectedMerged} /> : <JudgeMode mergedState={selectedMerged} />}
+        {mode === 'debug' ? (
+          <DebugMode mergedState={selectedMerged} />
+        ) : mode === 'carier' ? (
+          <CarierMode />
+        ) : (
+          <JudgeMode mergedState={selectedMerged} />
+        )}
       </div>
     </main>
   );

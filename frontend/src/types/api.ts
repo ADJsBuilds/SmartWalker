@@ -1,6 +1,6 @@
 export type ApiStatus = 'connected' | 'degraded' | 'offline';
 export type WsStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
-export type AppMode = 'judge' | 'debug' | 'clinician';
+export type AppMode = 'judge' | 'debug' | 'clinician' | 'carier';
 
 export type Maybe<T> = T | null;
 

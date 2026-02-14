@@ -8,6 +8,7 @@ interface ModeSwitchProps {
 const modes: Array<{ id: AppMode; label: string }> = [
   { id: 'judge', label: 'Judge Mode' },
   { id: 'debug', label: 'Debug Mode' },
+  { id: 'carier', label: 'Carier Mode' },
   { id: 'clinician', label: 'Clinician' },
 ];
 
