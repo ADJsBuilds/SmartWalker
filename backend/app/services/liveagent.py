@@ -17,11 +17,13 @@ class LiveAgentClient:
     def _base_url(self) -> str:
         if self.settings.liveagent_base_url:
             return self.settings.liveagent_base_url.rstrip('/')
+        # Avoid inheriting old HEYGEN_BASE_URL (often a path endpoint like /v1/video/generate).
+        # LiveAgent SDK uses api.liveavatar.com by default.
         if self.settings.heygen_base_url:
             parsed = urlparse(self.settings.heygen_base_url)
-            if parsed.scheme and parsed.netloc:
-                return f'{parsed.scheme}://{parsed.netloc}'
-        return 'https://api.heygen.com'
+            if parsed.netloc == 'api.liveavatar.com':
+                return f'{parsed.scheme or "https"}://{parsed.netloc}'
+        return 'https://api.liveavatar.com'
 
     def _api_key(self) -> str:
         return (self.settings.liveagent_api_key or self.settings.heygen_api_key or '').strip()
@@ -63,6 +65,7 @@ class LiveAgentClient:
                         'sessionId': session_id,
                         'raw': raw,
                         'tokenEndpoint': url,
+                        'baseUrl': base,
                     }
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code == 404:
@@ -74,7 +77,7 @@ class LiveAgentClient:
                     continue
             return {
                 'ok': False,
-                'error': f'Unable to create token. Tried endpoints: {", ".join(candidate_urls)}. Last error: {last_error or "unknown"}',
+                'error': f'Unable to create token. Base URL: {base}. Tried endpoints: {", ".join(candidate_urls)}. Last error: {last_error or "unknown"}',
                 'raw': None,
             }
 
