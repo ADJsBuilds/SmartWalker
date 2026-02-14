@@ -9,3 +9,6 @@ backend/data/*.db
 frontend/node_modules/
 frontend/dist/
 frontend/.npm-cache/
+
+# Render env table (contains secrets; do not commit)
+docs/RENDER_CARRIER_VARS_TABLE.md

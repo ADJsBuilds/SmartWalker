@@ -71,7 +71,16 @@ def get_zoom_access_token(settings: Settings) -> str:
     client_id = (settings.zoom_client_id or "").strip()
     client_secret = (settings.zoom_client_secret or "").strip()
     if not account_id or not client_id or not client_secret:
-        raise ValueError("Zoom credentials not configured (account_id, client_id, client_secret)")
+        missing = []
+        if not account_id:
+            missing.append("ZOOM_ACCOUNT_ID")
+        if not client_id:
+            missing.append("ZOOM_CLIENT_ID")
+        if not client_secret:
+            missing.append("ZOOM_CLIENT_SECRET")
+        raise ValueError(
+            "Zoom is not configured. In Render → Environment, set: " + ", ".join(missing)
+        )
 
     import base64
     basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
