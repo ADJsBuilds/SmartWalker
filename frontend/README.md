@@ -1,6 +1,9 @@
 # SmartWalker Frontend
 
-Demo-ready React + TypeScript + Tailwind dashboard for Smart Assistive Walker.
+Mode-based demo frontend for Smart Assistive Walker, optimized for:
+- Judge Mode (elder-friendly, iPad-mounted)
+- Debug Mode (engineer integration console)
+- Standalone CV window (`/cv`)
 
 ## Install and Run
 
@@ -33,21 +36,8 @@ Default fallback: `http://localhost:8000`
 
 ## Routes
 
-- `/` main dashboard with tabs:
-  - Computer Vision
-  - Patient Data
-  - Live Exercise Dashboard
-- `/cv` standalone Computer Vision window (independent WebSocket connection)
-
-## Render Deploy
-
-Repository includes a root `render.yaml` blueprint that defines:
-- `smartwalker-backend` (Python web service from `backend/`)
-- `smartwalker-frontend` (static site from `frontend/`)
-
-After import on Render:
-- Update `VITE_API_BASE_URL` to your actual backend URL if service name differs.
-- Keep secrets (`HEYGEN_API_KEY`, `OPENEVIDENCE_API_KEY`, etc.) in Render env vars.
+- `/` mode switch UI (Judge default, Debug one click away)
+- `/cv` standalone CV window (independent websocket)
 
 ## Resilience and Fallbacks
 
@@ -55,3 +45,22 @@ After import on Render:
 - HeyGen failures fallback to browser `SpeechSynthesis`.
 - Agent failures fallback to local manual response text.
 - If backend is unreachable, app enters mock-data mode to remain demoable.
+
+## Mode Summary
+
+- **Judge Mode**
+  - Start/Stop walk flow
+  - Huge step count and safety banner
+  - Minimal key metrics
+  - Coach panel (HeyGen + speech fallback)
+- **Debug Mode**
+  - Camera placeholder + open CV window
+  - Grouped metric cards
+  - Event log table
+  - Raw merged JSON with copy
+  - Staleness indicators and timestamps
+- **Debug Drawer (both modes)**
+  - API/WS URLs + status
+  - Last walker/vision/merged timestamps
+  - Test packet buttons
+  - Simulate fall toggle

@@ -1,5 +1,6 @@
 export type ApiStatus = 'connected' | 'degraded' | 'offline';
 export type WsStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+export type AppMode = 'judge' | 'debug' | 'clinician';
 
 export type Maybe<T> = T | null;
 
@@ -17,6 +18,20 @@ export interface MergedState {
   walker?: Record<string, unknown> | null;
   vision?: Record<string, unknown> | null;
   metrics: MergedMetrics;
+}
+
+export interface EventLogEntry {
+  id: string;
+  time: string;
+  residentId: string;
+  source: 'snapshot' | 'merged_update' | 'manual_refresh' | 'test_walker' | 'test_vision' | 'mock';
+  changedFields: string[];
+}
+
+export interface ToastMessage {
+  id: string;
+  level: 'info' | 'warn' | 'error';
+  message: string;
 }
 
 export interface Resident {
