@@ -1,0 +1,16 @@
+.venv
+__pycache__
+.pytest_cache
+*.pyc
+*.pyo
+*.pyd
+.Python
+.mypy_cache
+.ruff_cache
+data
+tests
+docs
+tmp
+.git
+.gitignore
+ENV_RENDER_TEMPLATE.txt

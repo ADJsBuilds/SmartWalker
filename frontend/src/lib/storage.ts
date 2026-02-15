@@ -1,7 +1,13 @@
 const API_BASE_URL_KEY = 'smartwalker.apiBaseUrl';
 
 export function getDefaultApiBaseUrl(): string {
-  return import.meta.env.VITE_API_BASE_URL || 'https://smartwalker-back.onrender.com';
+  const configured = (import.meta.env.VITE_API_BASE_URL || '').trim();
+  if (configured) return configured;
+
+  if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    return 'http://localhost:8000';
+  }
+  return 'https://smartwalker-back.onrender.com';
 }
 
 export function getStoredApiBaseUrl(): string {
