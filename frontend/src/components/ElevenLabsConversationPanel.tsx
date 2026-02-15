@@ -41,9 +41,6 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
   const micCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const micProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const playbackCtxRef = useRef<AudioContext | null>(null);
-  const playbackNextStartRef = useRef(0);
-  const playbackChainRef = useRef<Promise<void>>(Promise.resolve());
   const avatarReadyRef = useRef(false);
   const avatarSpeakingRef = useRef(false);
   const currentTurnIdRef = useRef<string | null>(null);
@@ -83,43 +80,6 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
     appendLog('out', `eleven: ${JSON.stringify(payload)}`);
-  };
-
-  const getPlaybackContext = async (): Promise<AudioContext> => {
-    if (!playbackCtxRef.current) {
-      playbackCtxRef.current = new AudioContext();
-      playbackNextStartRef.current = 0;
-    }
-    if (playbackCtxRef.current.state === 'suspended') {
-      await playbackCtxRef.current.resume();
-    }
-    return playbackCtxRef.current;
-  };
-
-  const clearPlaybackQueue = async () => {
-    playbackChainRef.current = Promise.resolve();
-    playbackNextStartRef.current = 0;
-    if (playbackCtxRef.current) {
-      await playbackCtxRef.current.close();
-      playbackCtxRef.current = null;
-    }
-  };
-
-  const scheduleLocalPlayback = async (pcm16le: Uint8Array, sampleRate: number) => {
-    const ctx = await getPlaybackContext();
-    const frameCount = Math.floor(pcm16le.byteLength / 2);
-    const audioBuffer = ctx.createBuffer(1, frameCount, sampleRate);
-    const channel = audioBuffer.getChannelData(0);
-    const view = new DataView(pcm16le.buffer, pcm16le.byteOffset, pcm16le.byteLength);
-    for (let i = 0; i < frameCount; i += 1) {
-      channel[i] = view.getInt16(i * 2, true) / 32768;
-    }
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(ctx.destination);
-    const startAt = Math.max(ctx.currentTime, playbackNextStartRef.current);
-    source.start(startAt);
-    playbackNextStartRef.current = startAt + audioBuffer.duration;
   };
 
   const flushLiveAvatarAudio = () => {
@@ -169,8 +129,7 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
     currentTurnIdRef.current = null;
     liveAvatarPcmBufferRef.current = new Uint8Array(0);
     avatarSpeakingRef.current = false;
-    await clearPlaybackQueue();
-    appendLog('sys', 'Barge-in: interrupted avatar and cleared playback buffers');
+    appendLog('sys', 'Barge-in: interrupted avatar and cleared pending avatar speak buffers');
   };
 
   const connectLiveKit = async (livekitUrl: string, livekitClientToken: string) => {
@@ -186,10 +145,13 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
         if (track.kind === Track.Kind.Video) {
           element.className = 'h-full w-full rounded-xl object-cover bg-black';
         } else {
-          element.className = 'hidden';
           const audioEl = element as HTMLAudioElement;
+          audioEl.className = 'hidden';
           audioEl.autoplay = true;
-          audioEl.muted = true;
+          audioEl.muted = false;
+          void audioEl.play().catch(() => appendLog('sys', 'LiveKit audio autoplay blocked; click Start Talking to unlock audio.'));
+          videoHostRef.current?.appendChild(audioEl);
+          return;
         }
         videoHostRef.current?.appendChild(element);
       },
@@ -299,8 +261,6 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
           const base64 = String(audioEvent.audio_base_64 || '');
           if (!base64) return;
           const rawPcm = base64ToUint8(base64);
-
-          playbackChainRef.current = playbackChainRef.current.then(() => scheduleLocalPlayback(rawPcm, elevenOutputRateRef.current));
 
           const float32 = pcm16ToFloat32(rawPcm);
           const resampled = resampleLinear(float32, elevenOutputRateRef.current, LIVEAVATAR_TARGET_RATE);
@@ -413,7 +373,6 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
       await connectLiveKit(session.livekit_url, session.livekit_client_token);
       await connectLiveAvatarWs(session.ws_url);
       await connectElevenWs();
-      await getPlaybackContext();
 
       setStatus('connected');
       appendLog('sys', 'Session fully connected (LiveKit + LiveAvatar WS + Eleven WS)');
@@ -436,7 +395,6 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
     }
     await stopMicStreaming();
     endAgentTurn();
-    await clearPlaybackQueue();
 
     if (elevenWsRef.current && elevenWsRef.current.readyState <= WebSocket.OPEN) elevenWsRef.current.close(1000, 'manual stop');
     elevenWsRef.current = null;
@@ -467,7 +425,7 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
   return (
     <div className="rounded-2xl bg-slate-900 p-4 sm:p-6">
       <h3 className="text-2xl font-black text-white">ElevenLabs + LiveAvatar LITE Bridge</h3>
-      <p className="mt-1 text-sm text-slate-300">Mic -&gt; ElevenLabs -&gt; local audio + LiveAvatar agent.speak -&gt; LiveKit avatar video.</p>
+      <p className="mt-1 text-sm text-slate-300">Mic -&gt; ElevenLabs -&gt; LiveAvatar agent.speak -&gt; LiveKit avatar video+audio.</p>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         <div className="space-y-3">
