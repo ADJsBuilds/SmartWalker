@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiClient, isNetworkError, isNotImplementedError } from '../lib/apiClient';
-import { getStoredApiBaseUrl, normalizeBaseUrl } from '../lib/storage';
+import { getDefaultApiBaseUrl, getStoredApiBaseUrl, normalizeBaseUrl } from '../lib/storage';
 import { SmartWalkerWsClient } from '../lib/wsClient';
 import type { ApiStatus, AppMode, EventLogEntry, MergedState, Resident, ToastMessage, WsStatus } from '../types/api';
 
@@ -222,6 +222,12 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
         }
       } catch (error) {
         if (isNetworkError(error)) {
+          const fallbackApiBaseUrl = normalizeBaseUrl(getDefaultApiBaseUrl());
+          if (normalizeBaseUrl(apiBaseUrl) !== fallbackApiBaseUrl) {
+            setApiBaseUrlState(fallbackApiBaseUrl);
+            addToast('Saved API URL was unreachable. Reset to the deployed backend URL.', 'warn');
+            return;
+          }
           setApiStatus('offline');
           setMockMode(true);
           addToast('Backend unreachable. Running in mock mode.', 'warn');
