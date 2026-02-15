@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { MetricCard } from '../components/MetricCard';
 import { isNotImplementedError } from '../lib/apiClient';
 import { LiveAgentController } from '../lib/liveAgent';
@@ -20,6 +20,7 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   const [isListening, setListening] = useState(false);
   const [liveAgentStatus, setLiveAgentStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'>('idle');
   const [liveAgentTranscript, setLiveAgentTranscript] = useState<string>('');
+  const [pttHolding, setPttHolding] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const coachVideoRef = useRef<HTMLVideoElement | null>(null);
   const liveAgentRef = useRef<LiveAgentController | null>(null);
@@ -82,6 +83,7 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   const disconnectLiveAgent = async () => {
     await liveAgentRef.current?.disconnect();
     setLiveAgentStatus('disconnected');
+    setPttHolding(false);
   };
 
   const playCoach = async (text: string) => {
@@ -116,6 +118,25 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
     speakText(coachScript);
     if (!liveAgentRef.current?.isConnected || !usedLiveAvatar) {
       notify('LiveAgent not connected. Used browser voice fallback.', 'warn');
+    }
+  };
+
+  const startPtt = (event: PointerEvent<HTMLButtonElement>) => {
+    if (liveAgentStatus !== 'connected') return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPttHolding(true);
+    liveAgentRef.current?.startListening();
+  };
+
+  const stopPtt = (event: PointerEvent<HTMLButtonElement>) => {
+    if (pttHolding) {
+      event.preventDefault();
+      liveAgentRef.current?.stopListening();
+      setPttHolding(false);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
 
@@ -246,13 +267,15 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
               <button
                 type="button"
                 disabled={liveAgentStatus !== 'connected'}
-                onMouseDown={() => liveAgentRef.current?.startListening()}
-                onMouseUp={() => liveAgentRef.current?.stopListening()}
-                onTouchStart={() => liveAgentRef.current?.startListening()}
-                onTouchEnd={() => liveAgentRef.current?.stopListening()}
+                onPointerDown={startPtt}
+                onPointerUp={stopPtt}
+                onPointerCancel={stopPtt}
+                onPointerLeave={stopPtt}
+                onLostPointerCapture={stopPtt}
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ touchAction: 'none' }}
               >
-                Hold to Talk
+                {pttHolding ? 'Listening… release to stop' : 'Hold to Talk'}
               </button>
             </div>
             <textarea
