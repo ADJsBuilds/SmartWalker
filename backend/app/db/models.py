@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -127,3 +127,44 @@ class DailyMetricRollup(Base):
     inactivity_count: Mapped[int] = mapped_column(Integer, default=0)
     active_seconds: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExerciseMetricSample(Base):
+    """
+    Normalized table: one row per vision/merged sample.
+    Used for live exercise dashboard (recent rows) and aggregate historical data (homepage, doctor view).
+    All vision + config fields as columns; optional fields nullable.
+    """
+    __tablename__ = 'exercise_metric_samples'
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    resident_id: Mapped[str] = mapped_column(String(64), ForeignKey('residents.id'), index=True)
+    camera_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    ts: Mapped[int] = mapped_column(Integer, index=True)
+
+    fall_suspected: Mapped[bool] = mapped_column(Boolean, default=False)
+    fall_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    total_time_on_ground_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    posture_state: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    step_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cadence_spm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_cadence_spm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    step_time_cv: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    step_time_mean: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    activity_state: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    asymmetry_index: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fall_risk_level: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    fall_risk_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fog_status: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    fog_episodes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    fog_duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    person_detected: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    source_fps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    frame_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    steps_merged: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tilt_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    step_var: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

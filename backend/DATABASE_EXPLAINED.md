@@ -268,6 +268,49 @@ WHERE resident_id = 'r1';
 
 ---
 
+## 3. **ExerciseMetricSamples Table** (`exercise_metric_samples`) — Normalized metrics
+
+One **row per sample**, one **column per field**. Used for the live exercise tab (recent rows) and for aggregate historical data on the homepage and doctor view. Populated at the same time as `metric_samples` (every persist interval).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | VARCHAR(64) | UUID primary key |
+| resident_id | VARCHAR(64) | FK to residents |
+| camera_id | VARCHAR(64) nullable | From config/vision |
+| ts | INTEGER | Unix timestamp (indexed) |
+| fall_suspected | BOOLEAN | Fall or LYING posture |
+| fall_count | INTEGER nullable | Total fall count |
+| total_time_on_ground_seconds | FLOAT nullable | Time on ground |
+| posture_state | VARCHAR(32) nullable | e.g. LYING, UPRIGHT |
+| step_count | INTEGER nullable | Steps (CV/IMU fusion) |
+| cadence_spm | FLOAT nullable | Cadence steps/min |
+| avg_cadence_spm | FLOAT nullable | Average cadence |
+| step_time_cv | FLOAT nullable | Step time from CV |
+| step_time_mean | FLOAT nullable | Mean step time |
+| activity_state | VARCHAR(32) nullable | walking, idle, etc. |
+| asymmetry_index | FLOAT nullable | Asymmetry value |
+| fall_risk_level | VARCHAR(32) nullable | low, medium, high |
+| fall_risk_score | FLOAT nullable | 0–100 |
+| fog_status | VARCHAR(64) nullable | Freezing of gait |
+| fog_episodes | INTEGER nullable | FoG episode count |
+| fog_duration_seconds | FLOAT nullable | Total FoG duration |
+| person_detected | BOOLEAN nullable | Person in frame |
+| confidence | FLOAT nullable | Detection confidence |
+| source_fps | FLOAT nullable | Camera FPS |
+| frame_id | VARCHAR(128) nullable | Frame identifier |
+| steps_merged | INTEGER nullable | From merged metrics |
+| tilt_deg | FLOAT nullable | From walker/merged |
+| step_var | FLOAT nullable | Step variability |
+| created_at | DATETIME | Row insert time |
+
+**APIs:**
+
+- **Live exercise tab:** `GET /api/exercise-metrics/live?residentId=r1&limit=100` — recent samples (newest first). Optional `sinceTs` for only rows after a timestamp.
+- **Homepage / Doctor view (daily):** `GET /api/exercise-metrics/aggregates?residentId=r1&days=7` — daily aggregates (steps, fall count, cadence/step_var averages, FoG).
+- **Summary:** `GET /api/exercise-metrics/summary?residentId=r1&days=7` — single summary (totals, fall count, cadence avg, FoG totals).
+
+---
+
 ## Current Data Flow Summary
 
 ```
@@ -281,7 +324,7 @@ Sensor/Vision → POST /api/walker or /api/vision
                 ↓
          Every 5 seconds: Save to DB
                 ↓
-         metric_samples table (JSON strings)
+         metric_samples (JSON) + exercise_metric_samples (normalized columns)
 ```
 
 ---

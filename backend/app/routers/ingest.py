@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.db.models import MetricSample, Resident
+from app.db.models import ExerciseMetricSample, MetricSample, Resident
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.services.merge_state import compute_merged, merged_state, now_ts, vision_state, walker_state
@@ -64,6 +64,75 @@ class VisionPacket(BaseModel):
     frameId: Optional[str] = Field(default=None, validation_alias=AliasChoices('frameId', 'frame_id'))
 
 
+def _get_opt(d: Dict[str, Any], key: str, *aliases: str) -> Any:
+    for k in (key, *aliases):
+        if k in d and d[k] is not None:
+            return d[k]
+    return None
+
+
+def _persist_exercise_sample(db: Session, resident_id: str, merged: Dict[str, Any], now: int) -> None:
+    """Write one normalized row to exercise_metric_samples for live + historical queries."""
+    ts = int(merged.get('ts') or now)
+    vision = merged.get('vision') or {}
+    metrics = merged.get('metrics') or {}
+
+    def _int(v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _float(v: Any) -> Optional[float]:
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _bool(v: Any) -> bool:
+        return bool(v)
+
+    def _str(v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    row = ExerciseMetricSample(
+        resident_id=resident_id,
+        camera_id=_str(_get_opt(vision, 'cameraId', 'camera_id')),
+        ts=ts,
+        fall_suspected=_bool(_get_opt(vision, 'fallSuspected', 'fall_suspected') or _get_opt(metrics, 'fallSuspected', 'fall_suspected')),
+        fall_count=_int(_get_opt(vision, 'fallCount', 'fall_count')),
+        total_time_on_ground_seconds=_float(_get_opt(vision, 'totalTimeOnGroundSeconds', 'total_time_on_ground_seconds')),
+        posture_state=_str(_get_opt(vision, 'postureState', 'posture_state')),
+        step_count=_int(_get_opt(vision, 'stepCount', 'step_count') or _get_opt(metrics, 'steps')),
+        cadence_spm=_float(_get_opt(vision, 'cadenceSpm', 'cadence_spm')),
+        avg_cadence_spm=_float(_get_opt(vision, 'avgCadenceSpm', 'avg_cadence_spm')),
+        step_time_cv=_float(_get_opt(vision, 'stepTimeCv', 'step_time_cv')),
+        step_time_mean=_float(_get_opt(vision, 'stepTimeMean', 'step_time_mean')),
+        activity_state=_str(_get_opt(vision, 'activityState', 'activity_state')),
+        asymmetry_index=_float(_get_opt(vision, 'asymmetryIndex', 'asymmetry_index')),
+        fall_risk_level=_str(_get_opt(vision, 'fallRiskLevel', 'fall_risk_level')),
+        fall_risk_score=_float(_get_opt(vision, 'fallRiskScore', 'fall_risk_score')),
+        fog_status=_str(_get_opt(vision, 'fogStatus', 'fog_status')),
+        fog_episodes=_int(_get_opt(vision, 'fogEpisodes', 'fog_episodes')),
+        fog_duration_seconds=_float(_get_opt(vision, 'fogDurationSeconds', 'fog_duration_seconds')),
+        person_detected=_get_opt(vision, 'personDetected', 'person_detected'),
+        confidence=_float(_get_opt(vision, 'confidence')),
+        source_fps=_float(_get_opt(vision, 'sourceFps', 'source_fps')),
+        frame_id=_str(_get_opt(vision, 'frameId', 'frame_id')),
+        steps_merged=_int(_get_opt(metrics, 'steps')),
+        tilt_deg=_float(_get_opt(metrics, 'tiltDeg', 'tilt_deg')),
+        step_var=_float(_get_opt(vision, 'stepVar', 'step_var')),
+    )
+    db.add(row)
+
+
 async def _update_and_push(resident_id: str, db: Session) -> None:
     settings = get_settings()
     persist_interval_seconds = max(1, int(settings.ingest_persist_interval_seconds or 5))
@@ -115,6 +184,7 @@ async def _update_and_push(resident_id: str, db: Session) -> None:
             merged_json=json.dumps(merged_payload),
         )
     )
+    _persist_exercise_sample(db, resident_id, merged, now)
     db.commit()
 
 
