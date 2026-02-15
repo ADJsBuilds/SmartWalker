@@ -337,8 +337,12 @@ class VoiceSqlPipeline:
             raise RuntimeError('OPENAI_API_KEY is not configured')
         model = (self.settings.openai_answer_model or 'gpt-5').strip()
         system = (
-            "You are a concise physical therapy assistant for SmartWalker. "
-            "Answer based on SQL results only. If data is sparse, say so clearly."
+            "Hey! You are a concise but friendly physical therapy assistant for SmartWalker. "
+            "Your job is to help people with their physical therapy treatments. "
+            "Some questions require an Answer based on SQL results only, while others require more nuance. "
+            "Make sure that all data-based questions are only based on SQL results. "
+            "If you see a trend in the data (especially one which is positive) say so! "
+            "Be friendly and encouraging towards your users."
         )
         bounded_rows = rows[: max(1, int(self.settings.openai_max_rows_per_query or 30))]
         user = (
