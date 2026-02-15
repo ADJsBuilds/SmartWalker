@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     openai_sql_cache_ttl_seconds: int = 20
     voice_action_confirmation_timeout_seconds: int = 20
     voice_action_enable_llm_fallback: bool = False
+    proactive_monitor_enabled: bool = False
+    proactive_weight_threshold_kg: float = 20.0
+    proactive_balance_threshold: float = 0.30
+    proactive_event_cooldown_seconds: int = 30
+    proactive_max_speaks_per_minute: int = 4
+    proactive_require_active_avatar: bool = True
     ingest_persist_interval_seconds: int = 5
     ingest_risk_persist_interval_seconds: int = 1
     ingest_store_full_payload_every_n_samples: int = 3

@@ -193,3 +193,79 @@ class VoiceActionRouter:
             confidence=max(0.0, min(1.0, confidence)),
         )
 
+    async def generate_proactive_message(
+        self,
+        *,
+        event_type: str,
+        metrics_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        normalized_event = _normalize_text(event_type)
+        fallback = self._fallback_proactive_message(normalized_event, metrics_snapshot or {})
+        api_key = (self.settings.openai_api_key or '').strip()
+        if not api_key:
+            return fallback
+
+        model = (self.settings.openai_answer_model or self.settings.openai_sql_model or 'gpt-4o-mini').strip()
+        is_fall = normalized_event == 'fall'
+        system = (
+            "You are a proactive mobility safety assistant speaking through an avatar in a senior-care setting. "
+            "Return plain text only, 1-2 short sentences, easy to speak aloud, warm and direct. "
+            "Do not diagnose. Give concrete next-step guidance."
+        )
+        user = (
+            f"event_type: {normalized_event}\n"
+            f"metrics_snapshot: {json.dumps(metrics_snapshot or {}, ensure_ascii=True)}\n"
+            + (
+                "Must express concern and ask if they want to call for help."
+                if is_fall
+                else "Give concise coaching advice for safety and posture."
+            )
+        )
+        payload = {
+            'model': model,
+            'input': [
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': user},
+            ],
+        }
+        url = f"{(self.settings.openai_base_url or 'https://api.openai.com/v1').rstrip('/')}/responses"
+        headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                raw = response.json()
+        except Exception:
+            return fallback
+
+        text_value = _extract_output_text(raw if isinstance(raw, dict) else {}).strip()
+        if not text_value:
+            return fallback
+        if is_fall:
+            lower = text_value.lower()
+            if 'help' not in lower or '?' not in text_value:
+                return fallback
+        return text_value
+
+    def _fallback_proactive_message(self, event_type: str, metrics_snapshot: Dict[str, Any]) -> str:
+        if event_type == 'fall':
+            return "I noticed a possible fall and I am concerned. Do you want me to call for help?"
+        if event_type == 'high_load':
+            reliance = metrics_snapshot.get('reliance')
+            if isinstance(reliance, (int, float)):
+                return (
+                    f"I am noticing high weight on the walker, around {float(reliance):.1f} kilograms. "
+                    "Please slow down and keep your posture centered."
+                )
+            return "I am noticing high weight on the walker. Please slow down and keep your posture centered."
+        if event_type == 'imbalance':
+            balance = metrics_snapshot.get('balance')
+            if isinstance(balance, (int, float)):
+                side = 'left' if float(balance) > 0 else 'right'
+                return (
+                    f"You are leaning more to your {side} side right now. "
+                    "Try to redistribute your weight evenly on both handles."
+                )
+            return "You look unbalanced right now. Try to redistribute your weight evenly on both handles."
+        return "I noticed a safety-related change. Please move slowly and keep balanced posture."
+

@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.services.merge_state import compute_merged, merged_state, now_ts, vision_state, walker_state
 from app.services.analytics_store import persist_analytics_tick
+from app.services.proactive_monitor import proactive_monitor
 from app.services.retention import run_retention_cleanup
 from app.routers.ws import manager
 
@@ -243,6 +244,7 @@ async def _update_and_push(resident_id: str, db: Session) -> None:
     previous_merged = merged_state.get(resident_id)
     merged = compute_merged(resident_id)
     merged_state[resident_id] = merged
+    await proactive_monitor.evaluate_and_enqueue(resident_id, merged)
     event = {'type': 'merged_update', 'data': merged}
     await manager.broadcast_all(event)
     await manager.broadcast_resident(resident_id, event)

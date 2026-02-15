@@ -12,6 +12,7 @@ from app.audio.pcm import generate_test_tone_pcm16le
 from app.core.config import get_settings
 from app.services.elevenlabs_tts import ElevenLabsTTSService
 from app.services.liveavatar_lite import LiveAvatarLiteClient
+from app.services.proactive_monitor import proactive_monitor
 
 router = APIRouter(tags=['liveavatar-lite'])
 logger = logging.getLogger(__name__)
@@ -247,6 +248,7 @@ async def create_liveavatar_session(payload: LiveAvatarSessionPayload):
 async def stop_lite_session(payload: LiteStopPayload):
     result = await LiveAvatarLiteClient().stop_session(session_id=payload.session_id, session_token=payload.session_token)
     await lite_agent_manager.close_session(payload.session_id)
+    proactive_monitor.clear_session(payload.session_id)
     if result.get('ok'):
         return {'ok': True, 'error': None, 'raw': result.get('raw')}
     return {'ok': False, 'error': str(result.get('error') or 'session stop failed'), 'raw': result.get('raw')}

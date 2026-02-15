@@ -38,3 +38,11 @@ def test_parse_confirmation_tokens():
     assert parse_confirmation('no cancel that') == 'deny'
     assert parse_confirmation('what was my step count today') == 'unknown'
 
+
+def test_fallback_proactive_fall_message_contains_help_question():
+    router = VoiceActionRouter(settings=_settings())
+    message = router._fallback_proactive_message('fall', {'fallSuspected': True})
+    assert 'concern' in message.lower() or 'noticed' in message.lower()
+    assert 'help' in message.lower()
+    assert '?' in message
+

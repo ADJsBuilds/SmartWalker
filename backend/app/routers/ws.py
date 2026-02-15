@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.services.carrier import create_zoom_meeting, resolve_contact, send_meeting_email
 from app.services.merge_state import merged_state
+from app.services.proactive_monitor import proactive_monitor
 from app.services.voice_actions import VoiceActionRouter, ZoomActionCandidate, parse_confirmation
 from app.services.voice_sql_pipeline import VoiceSqlPipeline
 from app.services.ws_manager import ConnectionManager
@@ -573,6 +574,8 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     active_resident_id = maybe_resident
                 if maybe_liveavatar_session_id:
                     active_liveavatar_session_id = maybe_liveavatar_session_id
+                if active_resident_id and active_liveavatar_session_id:
+                    proactive_monitor.set_resident_session(active_resident_id, active_liveavatar_session_id)
                 await _send(
                     {
                         'type': 'session.started',

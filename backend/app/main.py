@@ -7,13 +7,21 @@ from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db.init_db import init_db
 from app.routers import agent, carrier, documents, exercise_metrics, health, ingest, integrations, liveavatar, patients, reports, suggestions, ws, eleven
+from app.services.proactive_monitor import proactive_monitor
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(get_settings().log_level)
     init_db()
+    proactive_monitor.configure_broadcasts(
+        broadcast_all=ws.manager.broadcast_all,
+        broadcast_resident=ws.manager.broadcast_resident,
+    )
+    await proactive_monitor.start()
+    app.state.proactive_monitor = proactive_monitor
     yield
+    await proactive_monitor.stop()
 
 
 def create_app() -> FastAPI:
