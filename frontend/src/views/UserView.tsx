@@ -72,6 +72,7 @@ export function UserView() {
   const [latestUserTranscript, setLatestUserTranscript] = useState('');
   const [latestAgentResponse, setLatestAgentResponse] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const videoHostRef = useRef<HTMLDivElement | null>(null);
   const voiceWsRef = useRef<WebSocket | null>(null);
   const pcmPlayerRef = useRef<PcmStreamPlayer>(new PcmStreamPlayer());
@@ -223,6 +224,7 @@ export function UserView() {
         }
         const transcript = typed.user_transcript;
         if (typeof transcript === 'string' && transcript.trim()) {
+          setIsTranscribing(false);
           setLatestUserTranscript(transcript.trim());
         }
 
@@ -238,6 +240,7 @@ export function UserView() {
           setLatestAgentResponse(text);
         }
         if (type === 'error') {
+          setIsTranscribing(false);
           const detail = String(typed.error || 'Unknown websocket error');
           setErrorText(detail);
         }
@@ -312,6 +315,8 @@ export function UserView() {
           setIsListening(false);
           appendVoiceLog(`sys recording stopped mime=${mimeType} bytes=${blob.size}`);
           if (!blob.size) return;
+          setIsTranscribing(true);
+          setLatestUserTranscript('Transcribing audio...');
           void (async () => {
             try {
               const audioBase64 = await blobToBase64(blob);
@@ -322,6 +327,7 @@ export function UserView() {
                 audio_base64: audioBase64,
               });
             } catch (error) {
+              setIsTranscribing(false);
               setErrorText(error instanceof Error ? error.message : 'Failed to send recorded audio.');
             }
           })();
@@ -335,6 +341,7 @@ export function UserView() {
         }, 4500);
       } catch (error) {
         setIsListening(false);
+        setIsTranscribing(false);
         setErrorText(error instanceof Error ? error.message : 'Could not access microphone.');
       }
     })();
@@ -355,7 +362,7 @@ export function UserView() {
       onStopVoiceAgent={disconnectVoiceAgent}
       onTalkToAgent={talkToAgent}
       voiceAgentStatus={voiceAgentStatus}
-      latestUserTranscript={latestUserTranscript}
+      latestUserTranscript={isListening ? 'Listening...' : isTranscribing ? 'Transcribing audio...' : latestUserTranscript}
       latestAgentResponse={latestAgentResponse}
       isListening={isListening}
     />
