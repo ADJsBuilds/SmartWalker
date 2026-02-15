@@ -89,6 +89,22 @@ export function UserView() {
     [apiClient],
   );
 
+  const appendVoiceLog = (line: string) => {
+    setLogLines((prev) => [`[${new Date().toLocaleTimeString()}] ${line}`, ...prev].slice(0, 160));
+  };
+
+  const compactPayloadForLog = (payload: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...payload };
+    const maybeAudio = out.audio_base64 || out.audio || out.chunk;
+    if (typeof maybeAudio === 'string') {
+      const approxBytes = Math.max(0, Math.floor((maybeAudio.length * 3) / 4));
+      if (typeof out.audio_base64 === 'string') out.audio_base64 = `<${approxBytes} bytes base64>`;
+      if (typeof out.audio === 'string') out.audio = `<${approxBytes} bytes base64>`;
+      if (typeof out.chunk === 'string') out.chunk = `<${approxBytes} bytes base64>`;
+    }
+    return out;
+  };
+
   const connect = async () => {
     if (!videoHostRef.current) return;
     videoHostRef.current.innerHTML = '';
@@ -140,6 +156,7 @@ export function UserView() {
     const ws = voiceWsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
+    appendVoiceLog(`out ${JSON.stringify(compactPayloadForLog(payload))}`);
   };
 
   const extractAgentText = (payload: Record<string, unknown>): string => {
@@ -169,7 +186,7 @@ export function UserView() {
 
       ws.onopen = () => {
         setVoiceAgentStatus('connected');
-        setLogLines((prev) => [`Voice websocket connected for resident ${activeResidentId}`, ...prev].slice(0, 80));
+        appendVoiceLog(`sys connected ws for resident=${activeResidentId}`);
         sendVoiceEvent({
           type: 'session.start',
           resident_id: activeResidentId,
@@ -178,10 +195,12 @@ export function UserView() {
       };
 
       ws.onclose = () => {
+        appendVoiceLog('sys websocket closed');
         setVoiceAgentStatus('idle');
       };
 
       ws.onerror = () => {
+        appendVoiceLog('sys websocket error');
         setVoiceAgentStatus('error');
       };
 
@@ -194,6 +213,7 @@ export function UserView() {
         }
         if (!payload || typeof payload !== 'object') return;
         const typed = payload as Record<string, unknown>;
+        appendVoiceLog(`in ${JSON.stringify(compactPayloadForLog(typed))}`);
         const type = String(typed.type || '');
         if (type === 'ping') {
           const pingEvent = (typed.ping_event as Record<string, unknown> | undefined) || {};
@@ -217,6 +237,10 @@ export function UserView() {
         if (text && (type.includes('agent') || type.includes('response') || type.includes('text'))) {
           setLatestAgentResponse(text);
         }
+        if (type === 'error') {
+          const detail = String(typed.error || 'Unknown websocket error');
+          setErrorText(detail);
+        }
       };
     } catch (error) {
       setVoiceAgentStatus('error');
@@ -231,6 +255,7 @@ export function UserView() {
     }
     const active = mediaRecorderRef.current;
     if (active && active.state === 'recording') {
+      appendVoiceLog('sys stopping active recording');
       active.stop();
       return;
     }
@@ -260,6 +285,7 @@ export function UserView() {
       try {
         setErrorText(null);
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        appendVoiceLog('sys microphone acquired');
         mediaStreamRef.current = stream;
         const preferredMimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
         const pickedMimeType = preferredMimeTypes.find((candidate) => MediaRecorder.isTypeSupported(candidate));
@@ -273,6 +299,7 @@ export function UserView() {
         recorder.onerror = () => {
           setIsListening(false);
           setErrorText('Microphone recording failed.');
+          appendVoiceLog('sys microphone recording error');
         };
         recorder.onstop = () => {
           const mimeType = recorder.mimeType || pickedMimeType || 'audio/webm';
@@ -283,6 +310,7 @@ export function UserView() {
             mediaStreamRef.current = null;
           }
           setIsListening(false);
+          appendVoiceLog(`sys recording stopped mime=${mimeType} bytes=${blob.size}`);
           if (!blob.size) return;
           void (async () => {
             try {
@@ -300,6 +328,7 @@ export function UserView() {
         };
 
         setIsListening(true);
+        appendVoiceLog('sys recording started');
         recorder.start(250);
         window.setTimeout(() => {
           if (recorder.state === 'recording') recorder.stop();

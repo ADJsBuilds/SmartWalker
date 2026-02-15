@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -49,32 +50,55 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
     async def _send(payload: dict[str, Any]) -> None:
         await websocket.send_json(payload)
 
+    async def _debug(stage: str, message: str, **meta: Any) -> None:
+        payload: dict[str, Any] = {'type': 'debug', 'stage': stage, 'message': message}
+        if meta:
+            payload['meta'] = meta
+        await _send(payload)
+
     async def _handle_turn(*, user_text: Optional[str] = None, audio_bytes: Optional[bytes] = None, mime_type: str = 'audio/webm') -> None:
         transcript = (user_text or '').strip()
+        turn_started = time.perf_counter()
         try:
             if audio_bytes:
+                await _debug('stt', 'Starting transcription', mime_type=mime_type, audio_bytes=len(audio_bytes))
                 transcript = await pipeline.transcribe_audio(audio_bytes, mime_type=mime_type)
+                await _debug('stt', 'Transcription completed', transcript_chars=len(transcript))
             if not transcript:
                 await _send({'type': 'error', 'error': 'No transcript text available'})
                 return
             await _send({'type': 'user_transcript', 'user_transcript': transcript})
 
+            sql_started = time.perf_counter()
+            await _debug('sql', 'Generating SQL from transcript')
             sql = await pipeline.generate_sql(transcript, active_resident_id)
+            await _debug('sql', 'SQL generated', sql=sql, elapsed_ms=int((time.perf_counter() - sql_started) * 1000))
             await _send({'type': 'sql_generated', 'sql': sql})
 
+            query_started = time.perf_counter()
             rows = pipeline.execute_sql(db, sql)
+            await _debug('sql', 'SQL executed', row_count=len(rows), elapsed_ms=int((time.perf_counter() - query_started) * 1000))
             await _send({'type': 'sql_result', 'row_count': len(rows), 'rows_preview': rows[:5]})
 
+            answer_started = time.perf_counter()
+            await _debug('answer', 'Generating answer text')
             answer = await pipeline.generate_answer(
                 question=transcript,
                 resident_id=active_resident_id,
                 sql=sql,
                 rows=rows,
             )
+            await _debug('answer', 'Answer generated', answer_chars=len(answer), elapsed_ms=int((time.perf_counter() - answer_started) * 1000))
             await _send({'type': 'agent_response', 'text': answer})
             await _send({'type': 'audio_start', 'sample_rate_hz': 24000})
 
+            tts_started = time.perf_counter()
+            chunk_count = 0
+            total_pcm_bytes = 0
+            await _debug('tts', 'Starting TTS audio stream')
             async for pcm_chunk in pipeline.stream_tts_pcm(answer):
+                chunk_count += 1
+                total_pcm_bytes += len(pcm_chunk)
                 await _send(
                     {
                         'type': 'audio_chunk',
@@ -82,8 +106,17 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                         'sample_rate_hz': 24000,
                     }
                 )
+            await _debug(
+                'tts',
+                'TTS audio stream finished',
+                chunk_count=chunk_count,
+                total_pcm_bytes=total_pcm_bytes,
+                elapsed_ms=int((time.perf_counter() - tts_started) * 1000),
+            )
             await _send({'type': 'audio_end'})
+            await _debug('turn', 'Completed turn', elapsed_ms=int((time.perf_counter() - turn_started) * 1000))
         except Exception as exc:
+            await _debug('error', 'Turn failed', detail=str(exc))
             await _send({'type': 'error', 'error': str(exc)})
 
     try:
