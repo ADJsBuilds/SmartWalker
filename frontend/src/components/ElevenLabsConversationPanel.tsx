@@ -29,6 +29,11 @@ const QNA_FETCH_TIMEOUT_MS = 320;
 const REALTIME_CONTEXT_MIN_INTERVAL_MS = 5000;
 const REALTIME_CONTEXT_MAX_CHARS = 360;
 const TOOL_RESULT_MAX_CHARS = 480;
+const LIVEAVATAR_LOG_SUPPRESSED_TYPES = new Set([
+  'session.keep_alive',
+  'agent.start_listening',
+  'agent.stop_listening',
+]);
 
 export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: ElevenLabsConversationPanelProps) {
   const [status, setStatus] = useState<SessionStatus>('idle');
@@ -91,11 +96,24 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     ].slice(0, 120));
   };
 
+  const compactLiveAvatarPayloadForLog = (payload: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...payload };
+    const audio = out.audio;
+    if (typeof audio === 'string') {
+      const approxBytes = Math.max(0, Math.floor((audio.length * 3) / 4));
+      out.audio = `<${approxBytes} bytes base64>`;
+    }
+    return out;
+  };
+
   const sendLiveAvatarEvent = (payload: Record<string, unknown>) => {
     const ws = liveAvatarWsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
-    appendLog('out', `liveavatar: ${JSON.stringify(payload)}`);
+    const payloadType = String(payload.type || '');
+    if (!LIVEAVATAR_LOG_SUPPRESSED_TYPES.has(payloadType)) {
+      appendLog('out', `liveavatar: ${JSON.stringify(compactLiveAvatarPayloadForLog(payload))}`);
+    }
   };
 
   const sendElevenEvent = (payload: Record<string, unknown>) => {
@@ -417,7 +435,9 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
         if (!payload || typeof payload !== 'object') return;
         const msg = payload as Record<string, unknown>;
         const type = String(msg.type || '');
-        appendLog('in', `liveavatar: ${JSON.stringify(msg)}`);
+        if (!LIVEAVATAR_LOG_SUPPRESSED_TYPES.has(type)) {
+          appendLog('in', `liveavatar: ${JSON.stringify(compactLiveAvatarPayloadForLog(msg))}`);
+        }
         if (type === 'session.state_updated') {
           const sessionState = String(msg.session_state || (msg.session as Record<string, unknown> | undefined)?.state || '').toLowerCase();
           setLiveAvatarState(sessionState || 'updated');
