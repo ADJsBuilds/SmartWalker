@@ -65,6 +65,8 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   const speechAttackFramesRef = useRef(0);
   const speechReleaseFramesRef = useRef(0);
   const contextCacheRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
+  const textTurnTimeoutRef = useRef<number | null>(null);
+  const pendingTextTurnRef = useRef<{ id: string; plainText: string; retried: boolean } | null>(null);
 
   useEffect(() => {
     return () => {
@@ -163,6 +165,39 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     void fetchContextPrompt({ preferCache: false, timeoutMs: 220 });
   };
 
+  const clearPendingTextTurn = () => {
+    pendingTextTurnRef.current = null;
+    if (textTurnTimeoutRef.current) {
+      window.clearTimeout(textTurnTimeoutRef.current);
+      textTurnTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleTextTurnWatchdog = (turnId: string, plainText: string) => {
+    clearPendingTextTurn();
+    pendingTextTurnRef.current = { id: turnId, plainText, retried: false };
+    textTurnTimeoutRef.current = window.setTimeout(() => {
+      const pending = pendingTextTurnRef.current;
+      if (!pending || pending.id !== turnId) return;
+      const ws = elevenWsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!pending.retried) {
+        pending.retried = true;
+        sendElevenEvent({ type: 'user_message', text: pending.plainText });
+        appendLog('sys', `Retrying stalled text turn id=${turnId} with plain question`);
+        textTurnTimeoutRef.current = window.setTimeout(() => {
+          if (pendingTextTurnRef.current?.id === turnId) {
+            appendLog('sys', `No response after retry for text turn id=${turnId}`);
+            clearPendingTextTurn();
+          }
+        }, 4500);
+        return;
+      }
+      appendLog('sys', `Text turn timeout id=${turnId}`);
+      clearPendingTextTurn();
+    }, 3500);
+  };
+
   const signalStopListening = () => {
     if (!listeningSignaledRef.current) return;
     listeningSignaledRef.current = false;
@@ -183,6 +218,48 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     const contextPrompt = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 240 });
     if (!contextPrompt) return;
     sendElevenEvent({ type: 'contextual_update', text: contextPrompt });
+  };
+
+  const parseToolCallQuestion = (raw: unknown): string => {
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return '';
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        return parseToolCallQuestion(parsed);
+      } catch {
+        return trimmed;
+      }
+    }
+    if (!raw || typeof raw !== 'object') return '';
+    const data = raw as Record<string, unknown>;
+    for (const key of ['question', 'query', 'text', 'prompt', 'user_question']) {
+      const value = data[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+  };
+
+  const handleClientToolCall = async (msg: Record<string, unknown>) => {
+    const call = (msg.client_tool_call as Record<string, unknown> | undefined) || {};
+    const rawToolCallId = call.tool_call_id;
+    const toolCallId = (typeof rawToolCallId === 'string' || typeof rawToolCallId === 'number') ? rawToolCallId : '';
+    if (toolCallId === '') {
+      appendLog('sys', 'client_tool_call missing tool_call_id');
+      return;
+    }
+    const toolName = String(call.tool_name || call.name || 'unknown_tool');
+    const question = parseToolCallQuestion(call.parameters ?? call.arguments ?? call.input ?? call.params);
+    const qnaContext = question ? await fetchQnaContextBlock(question, { timeoutMs: 260 }) : '';
+    const fallbackContext = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 220 });
+    const resultText = fallbackContext || 'No recent exercise samples are available yet. Ask the user to continue walking to collect signals.';
+    sendElevenEvent({
+      type: 'client_tool_result',
+      tool_call_id: toolCallId,
+      result: resultText,
+      is_error: false,
+    });
+    appendLog('sys', `Replied to client_tool_call name=${toolName} id=${toolCallId}`);
   };
 
   const flushLiveAvatarAudio = () => {
@@ -361,12 +438,18 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
           return;
         }
 
+        if (type === 'client_tool_call') {
+          void handleClientToolCall(msg);
+          return;
+        }
+
         if (type === 'interruption') {
           endAgentTurn();
           return;
         }
 
         if (type === 'audio') {
+          clearPendingTextTurn();
           const audioEvent = (msg.audio_event as Record<string, unknown> | undefined) || {};
           const base64 = String(audioEvent.audio_base_64 || '');
           if (!base64) return;
@@ -395,6 +478,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
         }
         const agentText = extractEventText(msg, ['agent_response', 'response', 'text']);
         if (agentText && (type.includes('agent') || type.includes('response'))) {
+          clearPendingTextTurn();
           setLastAgentText(agentText);
         }
       };
@@ -565,6 +649,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
       window.clearTimeout(speakEndTimerRef.current);
       speakEndTimerRef.current = null;
     }
+    clearPendingTextTurn();
     await stopMicStreaming();
     endAgentTurn();
 
@@ -592,10 +677,13 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     setLastUserText(text);
     const qnaContext = await fetchQnaContextBlock(text, { timeoutMs: 280 });
     const contextPrompt = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 240 });
-    const contextualText = contextPrompt
+    const contextIsMissingDataOnly = contextPrompt.toLowerCase().startsWith('no recent exercise samples are available');
+    const contextualText = contextPrompt && !contextIsMissingDataOnly
       ? `Use only the following exercise context facts when relevant. If data is missing, say so briefly.\nContext: ${contextPrompt}\n\nUser question: ${text}`
       : text;
+    const turnId = makeEventId();
     sendElevenEvent({ type: 'user_message', text: contextualText });
+    scheduleTextTurnWatchdog(turnId, text);
     setInputText('');
   };
 

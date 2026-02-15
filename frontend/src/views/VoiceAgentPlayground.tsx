@@ -196,6 +196,26 @@ export function VoiceAgentPlayground() {
     }
   };
 
+  const parseToolCallQuestion = (raw: unknown): string => {
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return '';
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        return parseToolCallQuestion(parsed);
+      } catch {
+        return trimmed;
+      }
+    }
+    if (!raw || typeof raw !== 'object') return '';
+    const data = raw as Record<string, unknown>;
+    for (const key of ['question', 'query', 'text', 'prompt', 'user_question']) {
+      const value = data[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+  };
+
   const sendUserMessageAsync = async () => {
     const text = messageText.trim();
     if (!text) return;
@@ -240,14 +260,20 @@ export function VoiceAgentPlayground() {
 
     if (type === 'client_tool_call') {
       const call = (event.client_tool_call as Record<string, unknown> | undefined) || {};
-      const toolCallId = String(call.tool_call_id || '');
-      if (toolCallId) {
-        sendSocketEvent({
-          type: 'client_tool_result',
-          tool_call_id: toolCallId,
-          result: 'NOT IMPLEMENTED',
-          is_error: true,
-        });
+      const rawToolCallId = call.tool_call_id;
+      const toolCallId = (typeof rawToolCallId === 'string' || typeof rawToolCallId === 'number') ? rawToolCallId : '';
+      if (toolCallId !== '') {
+        void (async () => {
+          const question = parseToolCallQuestion(call.parameters ?? call.arguments ?? call.input ?? call.params);
+          const qnaContext = question ? await fetchQnaContextBlock(question) : '';
+          const fallback = qnaContext || await fetchContextPrompt();
+          sendSocketEvent({
+            type: 'client_tool_result',
+            tool_call_id: toolCallId,
+            result: fallback || 'No recent exercise samples are available yet.',
+            is_error: false,
+          });
+        })();
       }
       return;
     }
