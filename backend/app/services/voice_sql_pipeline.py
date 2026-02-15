@@ -124,6 +124,21 @@ def _schema_for_intent(intent: str) -> str:
 def _template_sql(question: str, resident_id: str) -> Optional[str]:
     q = _normalize_question(question)
     esc_id = resident_id.replace("'", "''")
+    asks_tilt_degree = 'tilt degree' in q or ('tilt' in q and any(k in q for k in ('what is', 'current', 'latest')))
+    if asks_tilt_degree:
+        if 'today' in q:
+            return (
+                "SELECT tilt_deg AS tilt_degree, ts "
+                f"FROM exercise_metric_samples WHERE resident_id = '{esc_id}' "
+                "AND tilt_deg IS NOT NULL AND to_timestamp(ts)::date = CURRENT_DATE "
+                "ORDER BY ts DESC LIMIT 1"
+            )
+        return (
+            "SELECT tilt_deg AS tilt_degree, ts "
+            f"FROM exercise_metric_samples WHERE resident_id = '{esc_id}' "
+            "AND tilt_deg IS NOT NULL "
+            "ORDER BY ts DESC LIMIT 1"
+        )
     if ('how many' in q or 'count' in q) and 'step' in q and 'today' in q:
         return (
             "SELECT "

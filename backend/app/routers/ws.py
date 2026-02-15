@@ -45,14 +45,14 @@ async def ws_live(websocket: WebSocket, residentId: Optional[str] = Query(defaul
 
 
 @router.websocket('/ws/voice-agent')
-async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query(default='r_1')):
+async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query(default=None)):
     await websocket.accept()
     pipeline = VoiceSqlPipeline()
     settings = get_settings()
     db = SessionLocal()
     allowed_resident_id = str(settings.ingest_allowed_resident_id or 'r_1').strip()
     initial_resident = str(residentId or allowed_resident_id).strip() or allowed_resident_id
-    active_resident_id = allowed_resident_id if initial_resident != allowed_resident_id else initial_resident
+    active_resident_id = initial_resident
     active_liveavatar_session_id: Optional[str] = None
 
     async def _send(payload: dict[str, Any]) -> None:
@@ -64,6 +64,9 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
             payload['meta'] = meta
         await _send(payload)
 
+    def _coerce_resident(value: Any) -> str:
+        return str(value or '').strip()
+
     async def _handle_turn(
         *,
         user_text: Optional[str] = None,
@@ -71,9 +74,13 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
         mime_type: str = 'audio/webm',
         client_metrics: Optional[dict[str, Any]] = None,
         liveavatar_session_id: Optional[str] = None,
+        resident_id_override: Optional[str] = None,
     ) -> None:
+        nonlocal active_resident_id
         transcript = (user_text or '').strip()
         effective_liveavatar_session_id = (liveavatar_session_id or '').strip() or None
+        effective_resident_id = _coerce_resident(resident_id_override) or active_resident_id
+        active_resident_id = effective_resident_id
         turn_started = time.perf_counter()
         timeline_ms: dict[str, Any] = {
             'turn_started_ms': int(time.time() * 1000),
@@ -93,7 +100,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
 
             sql_started = time.perf_counter()
             await _debug('sql', 'Generating SQL from transcript')
-            sql = await pipeline.generate_sql(transcript, active_resident_id)
+            sql = await pipeline.generate_sql(transcript, effective_resident_id)
             await _debug(
                 'sql',
                 'SQL generated',
@@ -107,7 +114,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
             await _send({'type': 'sql_generated', 'sql': sql})
 
             query_started = time.perf_counter()
-            rows = pipeline.execute_sql(db, sql, resident_id=active_resident_id)
+            rows = pipeline.execute_sql(db, sql, resident_id=effective_resident_id)
             await _debug('sql', 'SQL executed', row_count=len(rows), elapsed_ms=int((time.perf_counter() - query_started) * 1000))
             await _send({'type': 'sql_result', 'row_count': len(rows), 'rows_preview': rows[:5]})
 
@@ -115,10 +122,10 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
             await _debug('answer', 'Generating answer text')
             question_normalized = transcript.lower()
             include_realtime = any(k in question_normalized for k in ('right now', 'currently', 'now', 'at the moment'))
-            realtime_summary = merged_state.get(active_resident_id) if include_realtime else None
+            realtime_summary = merged_state.get(effective_resident_id) if include_realtime else None
             answer = await pipeline.generate_answer(
                 question=transcript,
-                resident_id=active_resident_id,
+                resident_id=effective_resident_id,
                 sql=sql,
                 rows=rows,
                 realtime_summary=realtime_summary if isinstance(realtime_summary, dict) else None,
@@ -238,6 +245,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 'last_chunk_sent_ms': end_payload.get('last_chunk_sent_ms'),
             },
             liveavatar_session_id=str(session.get('liveavatar_session_id') or '').strip() or active_liveavatar_session_id,
+            resident_id_override=str(session.get('resident_id') or '').strip() or None,
         )
         audio_sessions.pop(session_id, None)
 
@@ -315,9 +323,6 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 maybe_resident = str(payload.get('resident_id') or '').strip()
                 maybe_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip()
                 if maybe_resident:
-                    if maybe_resident != allowed_resident_id:
-                        await _send({'type': 'error', 'error': f'Only resident_id={allowed_resident_id} is allowed in this deployment'})
-                        continue
                     active_resident_id = maybe_resident
                 if maybe_liveavatar_session_id:
                     active_liveavatar_session_id = maybe_liveavatar_session_id
@@ -335,7 +340,12 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     await _send({'type': 'error', 'error': 'Empty text message'})
                     continue
                 turn_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip() or active_liveavatar_session_id
-                await _handle_turn(user_text=text_value, liveavatar_session_id=turn_liveavatar_session_id)
+                turn_resident_id = _coerce_resident(payload.get('resident_id') or payload.get('residentId'))
+                await _handle_turn(
+                    user_text=text_value,
+                    liveavatar_session_id=turn_liveavatar_session_id,
+                    resident_id_override=turn_resident_id or None,
+                )
                 continue
             if msg_type == 'user_audio_start':
                 session_id = str(payload.get('session_id') or '').strip()
@@ -345,6 +355,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 active_audio_session_id = session_id
                 pending_chunk_meta = None
                 turn_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip() or active_liveavatar_session_id
+                turn_resident_id = _coerce_resident(payload.get('resident_id') or payload.get('residentId'))
                 audio_sessions[session_id] = {
                     'mime_type': str(payload.get('codec') or payload.get('mime_type') or 'audio/webm'),
                     'chunks': [],
@@ -355,6 +366,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     'partial_task': None,
                     'finalizing': False,
                     'liveavatar_session_id': turn_liveavatar_session_id,
+                    'resident_id': turn_resident_id or active_resident_id,
                 }
                 await _debug(
                     'stt',
@@ -364,6 +376,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     sample_rate=payload.get('sample_rate'),
                     channels=payload.get('channels'),
                     liveavatar_session_id=turn_liveavatar_session_id,
+                    resident_id=audio_sessions[session_id]['resident_id'],
                 )
                 continue
             if msg_type == 'user_audio_chunk_meta':
@@ -402,6 +415,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                         'speech_end_ms': payload.get('speech_end_ms'),
                     },
                     liveavatar_session_id=turn_liveavatar_session_id,
+                    resident_id_override=_coerce_resident(payload.get('resident_id') or payload.get('residentId')) or None,
                 )
                 continue
 
