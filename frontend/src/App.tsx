@@ -1,6 +1,10 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication } from 'livekit-client';
+
+import { createAndStartLiveAvatarLiteSession, getLiveAvatarLiteStatus, stopLiveAvatarLiteSession } from './liveavatarLite';
 
 type WsStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
+type AvatarStatus = 'idle' | 'starting' | 'connected' | 'ready' | 'error';
 type LogDirection = 'in' | 'out' | 'sys';
 
 interface LogItem {
@@ -139,7 +143,168 @@ function StateStreamPanel({ baseUrl }: { baseUrl: string }) {
   );
 }
 
-function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
+function AvatarPanel({
+  baseUrl,
+  onSessionChange,
+}: {
+  baseUrl: string;
+  onSessionChange: (sessionId: string | null) => void;
+}) {
+  const videoHostRef = useRef<HTMLDivElement | null>(null);
+  const roomRef = useRef<Room | null>(null);
+  const pollTimerRef = useRef<number | null>(null);
+  const sessionRef = useRef<{ sessionId: string; sessionToken: string } | null>(null);
+  const [status, setStatus] = useState<AvatarStatus>('idle');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState('');
+
+  const clearPoll = () => {
+    if (pollTimerRef.current !== null) {
+      window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  const startStatusPolling = (activeSessionId: string) => {
+    clearPoll();
+    const poll = async () => {
+      try {
+        const liveStatus = await getLiveAvatarLiteStatus(baseUrl, activeSessionId);
+        if (liveStatus.ready) {
+          setStatus('ready');
+        } else if (liveStatus.exists) {
+          setStatus('connected');
+        }
+        if (liveStatus.last_error) setErrorText(String(liveStatus.last_error));
+      } catch {
+        // Keep existing status if status endpoint is temporarily unavailable.
+      }
+    };
+    void poll();
+    pollTimerRef.current = window.setInterval(() => void poll(), 2000);
+  };
+
+  const startSession = async () => {
+    if (status === 'starting') return;
+    setErrorText('');
+    setStatus('starting');
+    try {
+      const created = await createAndStartLiveAvatarLiteSession(baseUrl);
+      const createdSessionId = String(created.session_id || '').trim();
+      const createdSessionToken = String(created.session_token || '').trim();
+      const livekitUrl = String(created.livekit_url || '').trim();
+      const livekitClientToken = String(created.livekit_client_token || '').trim();
+      if (!created.ok || !createdSessionId || !createdSessionToken || !livekitUrl || !livekitClientToken) {
+        throw new Error(created.error || 'Failed to create/start LiveAvatar LITE session');
+      }
+
+      const host = videoHostRef.current;
+      if (host) host.innerHTML = '';
+      const room = new Room();
+      roomRef.current = room;
+      room.on(
+        RoomEvent.TrackSubscribed,
+        (track: RemoteTrack, _publication: RemoteTrackPublication, _participant: RemoteParticipant) => {
+          const hostElement = videoHostRef.current;
+          if (!hostElement) return;
+          const element = track.attach();
+          if (track.kind === Track.Kind.Video) {
+            element.className = 'avatar-video';
+          } else {
+            element.className = 'avatar-audio';
+            const audioEl = element as HTMLAudioElement;
+            audioEl.autoplay = true;
+            audioEl.muted = false;
+            void audioEl.play().catch(() => {
+              setErrorText('Audio autoplay blocked. Interact with the page and retry.');
+            });
+          }
+          hostElement.appendChild(element);
+        },
+      );
+      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        track.detach().forEach((el: HTMLMediaElement) => el.remove());
+      });
+      await room.connect(livekitUrl, livekitClientToken);
+
+      sessionRef.current = { sessionId: createdSessionId, sessionToken: createdSessionToken };
+      setSessionId(createdSessionId);
+      onSessionChange(createdSessionId);
+      setStatus('connected');
+      startStatusPolling(createdSessionId);
+    } catch (error) {
+      setStatus('error');
+      setErrorText(error instanceof Error ? error.message : 'Failed to start avatar session');
+      onSessionChange(null);
+    }
+  };
+
+  const stopSession = async () => {
+    clearPoll();
+    const room = roomRef.current;
+    roomRef.current = null;
+    if (room) {
+      try {
+        room.removeAllListeners();
+        await room.disconnect();
+      } catch {
+        // Best effort room cleanup.
+      }
+    }
+
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    if (session) {
+      try {
+        await stopLiveAvatarLiteSession(baseUrl, {
+          session_id: session.sessionId,
+          session_token: session.sessionToken,
+        });
+      } catch {
+        // Best effort backend stop.
+      }
+    }
+
+    const host = videoHostRef.current;
+    if (host) {
+      host.innerHTML = '';
+      const placeholder = document.createElement('p');
+      placeholder.className = 'muted';
+      placeholder.textContent = 'Avatar video will appear here.';
+      host.appendChild(placeholder);
+    }
+
+    setSessionId(null);
+    onSessionChange(null);
+    setStatus('idle');
+  };
+
+  useEffect(() => {
+    return () => {
+      void stopSession();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="panel">
+      <h2>LiveAvatar LITE (via LiveKit)</h2>
+      <div className="row">
+        <button onClick={() => void startSession()}>Start Avatar Session</button>
+        <button onClick={() => void stopSession()}>Stop Avatar Session</button>
+      </div>
+      <div className="meta">
+        status: <b>{status}</b> | session: <b>{sessionId || '-'}</b>
+      </div>
+      {errorText ? <div className="meta">error: <b>{errorText}</b></div> : null}
+      <div className="avatar-host" ref={videoHostRef}>
+        <p className="muted">Avatar video will appear here.</p>
+      </div>
+    </div>
+  );
+}
+
+function VoiceAgentPanel({ baseUrl, liveavatarSessionId }: { baseUrl: string; liveavatarSessionId: string | null }) {
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -154,6 +319,7 @@ function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
   const [latestAnswer, setLatestAnswer] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [avatarSync, setAvatarSync] = useState('idle');
   const { logs, push, clear } = useLog(400);
 
   const ensureAudioContext = async (): Promise<AudioContext> => {
@@ -191,6 +357,15 @@ function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
     nextStartRef.current = startAt + buffer.duration;
   };
 
+  const sendSessionStart = (resident: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const msg: Record<string, unknown> = { type: 'session.start', resident_id: resident };
+    if (liveavatarSessionId) msg.liveavatar_session_id = liveavatarSessionId;
+    ws.send(JSON.stringify(msg));
+    push('out', compactPayload(msg));
+  };
+
   const connect = () => {
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
     const query = residentId.trim() ? `?residentId=${encodeURIComponent(residentId.trim())}` : '';
@@ -203,9 +378,7 @@ function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
     ws.onopen = () => {
       setStatus('connected');
       push('sys', 'connected');
-      const msg = { type: 'session.start', resident_id: residentId.trim() || 'r1' };
-      ws.send(JSON.stringify(msg));
-      push('out', compactPayload(msg));
+      sendSessionStart(residentId.trim() || 'r1');
     };
     ws.onerror = () => {
       setStatus('error');
@@ -243,8 +416,21 @@ function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
       if (type === 'error') {
         setIsTranscribing(false);
       }
+      if (type === 'debug') {
+        const stage = String(rec.stage || '');
+        if (stage === 'liveavatar_sync_start') setAvatarSync('syncing');
+        if (stage === 'liveavatar_sync_ok') setAvatarSync('ok');
+        if (stage === 'liveavatar_sync_error') setAvatarSync('error');
+      }
     };
   };
+
+  useEffect(() => {
+    if (status !== 'connected') return;
+    sendSessionStart(residentId.trim() || 'r1');
+    // Rebind backend session context when avatar session changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveavatarSessionId]);
 
   const disconnect = async () => {
     wsRef.current?.close(1000, 'manual disconnect');
@@ -270,7 +456,8 @@ function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
     const text = question.trim();
     if (!ws || ws.readyState !== WebSocket.OPEN || !text) return;
     setIsTranscribing(false);
-    const msg = { type: 'user_message', resident_id: residentId.trim() || 'r1', text };
+    const msg = { type: 'user_message', resident_id: residentId.trim() || 'r1', text } as Record<string, unknown>;
+    if (liveavatarSessionId) msg.liveavatar_session_id = liveavatarSessionId;
     ws.send(JSON.stringify(msg));
     push('out', compactPayload(msg));
   };
@@ -333,7 +520,8 @@ function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
             resident_id: residentId.trim() || 'r1',
             mime_type: blob.type || finalMime,
             audio_base64: audioBase64,
-          };
+          } as Record<string, unknown>;
+          if (liveavatarSessionId) msg.liveavatar_session_id = liveavatarSessionId;
           ws.send(JSON.stringify(msg));
           push('out', compactPayload(msg));
         } catch (err) {
@@ -373,7 +561,7 @@ function VoiceAgentPanel({ baseUrl }: { baseUrl: string }) {
         <button onClick={sendText}>Send Text</button>
         <button onClick={() => void startOrStopRecording()}>{isRecording ? 'Stop Recording' : 'Record Audio'}</button>
       </div>
-      <div className="meta">status: <b>{status}</b> | mic: <b>{statusText}</b></div>
+      <div className="meta">status: <b>{status}</b> | mic: <b>{statusText}</b> | avatar sync: <b>{avatarSync}</b></div>
       <div className="panel transcript">
         <h3>Live Transcription (from backend STT)</h3>
         <div className="value">{latestTranscript || '-'}</div>
@@ -392,6 +580,7 @@ export function App() {
     if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) return 'http://localhost:8000';
     return 'https://smartwalker-back.onrender.com';
   });
+  const [liveavatarSessionId, setLiveavatarSessionId] = useState<string | null>(null);
 
   const wsBase = useMemo(() => toWsUrl(baseUrl, ''), [baseUrl]);
 
@@ -406,8 +595,9 @@ export function App() {
         <div className="meta">HTTP base: <b>{baseUrl}</b></div>
         <div className="meta">WS base: <b>{wsBase}</b></div>
       </div>
+      <AvatarPanel baseUrl={baseUrl} onSessionChange={setLiveavatarSessionId} />
       <StateStreamPanel baseUrl={baseUrl} />
-      <VoiceAgentPanel baseUrl={baseUrl} />
+      <VoiceAgentPanel baseUrl={baseUrl} liveavatarSessionId={liveavatarSessionId} />
     </main>
   );
 }
