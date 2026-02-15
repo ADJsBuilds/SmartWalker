@@ -108,6 +108,21 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     appendLog('out', `eleven: ${JSON.stringify(payload)}`);
   };
 
+  const compactIncomingElevenPayload = (payload: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...payload };
+    const audioEvent = out.audio_event;
+    if (audioEvent && typeof audioEvent === 'object') {
+      const audioRecord = { ...(audioEvent as Record<string, unknown>) };
+      const b64 = audioRecord.audio_base_64;
+      if (typeof b64 === 'string') {
+        const approxBytes = Math.max(0, Math.floor((b64.length * 3) / 4));
+        audioRecord.audio_base_64 = `<${approxBytes} bytes base64>`;
+      }
+      out.audio_event = audioRecord;
+    }
+    return out;
+  };
+
   const fetchContextPrompt = async (options?: { preferCache?: boolean; timeoutMs?: number }): Promise<string> => {
     const preferCache = options?.preferCache ?? true;
     const timeoutMs = Math.max(80, options?.timeoutMs ?? CONTEXT_FETCH_TIMEOUT_MS);
@@ -410,7 +425,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
         if (!payload || typeof payload !== 'object') return;
         const msg = payload as Record<string, unknown>;
         const type = String(msg.type || '');
-        appendLog('in', `eleven: ${JSON.stringify(msg)}`);
+        appendLog('in', `eleven: ${JSON.stringify(compactIncomingElevenPayload(msg))}`);
 
         if (type === 'ping') {
           const pingEvent = (msg.ping_event as Record<string, unknown> | undefined) || {};
