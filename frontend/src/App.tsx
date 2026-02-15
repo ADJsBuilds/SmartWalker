@@ -153,7 +153,7 @@ function AvatarPanel({
   const videoHostRef = useRef<HTMLDivElement | null>(null);
   const roomRef = useRef<Room | null>(null);
   const pollTimerRef = useRef<number | null>(null);
-  const sessionRef = useRef<{ sessionId: string; sessionToken: string } | null>(null);
+  const sessionRef = useRef<{ sessionId: string; sessionToken: string | null } | null>(null);
   const [status, setStatus] = useState<AvatarStatus>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [errorText, setErrorText] = useState('');
@@ -191,10 +191,10 @@ function AvatarPanel({
     try {
       const created = await createAndStartLiveAvatarLiteSession(baseUrl);
       const createdSessionId = String(created.session_id || '').trim();
-      const createdSessionToken = String(created.session_token || '').trim();
+      const createdSessionToken = String(created.session_token || '').trim() || null;
       const livekitUrl = String(created.livekit_url || '').trim();
       const livekitClientToken = String(created.livekit_client_token || '').trim();
-      if (!created.ok || !createdSessionId || !createdSessionToken || !livekitUrl || !livekitClientToken) {
+      if (!created.ok || !createdSessionId || !livekitUrl || !livekitClientToken) {
         throw new Error(created.error || 'Failed to create/start LiveAvatar LITE session');
       }
 
@@ -254,7 +254,7 @@ function AvatarPanel({
 
     const session = sessionRef.current;
     sessionRef.current = null;
-    if (session) {
+    if (session?.sessionToken) {
       try {
         await stopLiveAvatarLiteSession(baseUrl, {
           session_id: session.sessionId,
