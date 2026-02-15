@@ -34,6 +34,10 @@ services:
       CORS_ALLOW_ORIGINS: '["*"]'
       DATABASE_URL: postgresql+psycopg2://smartwalker:smartwalker@postgres:5432/smartwalker
       STORAGE_DIR: /app/data
+      OPENAI_STT_MODEL: ${OPENAI_STT_MODEL:-gpt-4o-mini-transcribe}
+      OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
+      OPENAI_SQL_MODEL: ${OPENAI_SQL_MODEL:-gpt-4o-mini}
+      OPENAI_ANSWER_MODEL: ${OPENAI_ANSWER_MODEL:-gpt-4o-mini}
     ports:
       - "8000:8000"
     volumes:

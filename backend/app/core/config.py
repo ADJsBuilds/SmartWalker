@@ -50,9 +50,9 @@ class Settings(BaseSettings):
     include_provider_raw: bool = False
     openai_api_key: str = Field(default='', validation_alias='OPENAI_API_KEY')
     openai_base_url: str = Field(default='https://api.openai.com/v1', validation_alias='OPENAI_BASE_URL')
-    openai_stt_model: str = 'gpt-4o-transcribe'
-    openai_sql_model: str = 'gpt-5-mini'
-    openai_answer_model: str = 'gpt-5'
+    openai_stt_model: str = 'gpt-4o-mini-transcribe'
+    openai_sql_model: str = 'gpt-4o-mini'
+    openai_answer_model: str = 'gpt-4o-mini'
     openai_tts_model: str = 'gpt-4o-mini-tts'
     openai_tts_voice: str = 'alloy'
     ingest_persist_interval_seconds: int = 5
