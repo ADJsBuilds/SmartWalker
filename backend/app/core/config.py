@@ -55,8 +55,24 @@ class Settings(BaseSettings):
     openai_answer_model: str = 'gpt-4o-mini'
     openai_tts_model: str = 'gpt-4o-mini-tts'
     openai_tts_voice: str = 'alloy'
+    openai_max_rows_per_query: int = 30
+    openai_enable_template_sql: bool = True
+    openai_sql_cache_ttl_seconds: int = 20
     ingest_persist_interval_seconds: int = 5
+    ingest_risk_persist_interval_seconds: int = 1
     ingest_store_full_payload_every_n_samples: int = 3
+    ingest_allowed_resident_id: str = 'r_1'
+    ingest_dedupe_window_ms: int = 250
+    ingest_realtime_summary_max_age_seconds: int = 8
+    retention_enabled: bool = True
+    retention_run_interval_seconds: int = 3600
+    retention_metric_samples_days: int = 14
+    retention_exercise_metric_samples_days: int = 30
+    retention_ingest_events_days: int = 60
+    retention_walking_sessions_days: int = 90
+    retention_hourly_rollups_days: int = 90
+    retention_daily_rollups_days: int = 365
+    retention_daily_reports_days: int = 365
     cors_allow_origins: List[str] = ['*']
     log_level: str = 'INFO'
 

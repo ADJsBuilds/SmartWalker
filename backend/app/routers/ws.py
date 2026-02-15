@@ -7,7 +7,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+<<<<<<< HEAD
 from app.agents.lite_agent import lite_agent_manager
+=======
+from app.core.config import get_settings
+>>>>>>> c61e0a3 (feat: add voice sql pipeline retention and websocket/ingest updates)
 from app.db.session import SessionLocal
 from app.services.merge_state import merged_state
 from app.services.voice_sql_pipeline import VoiceSqlPipeline
@@ -44,12 +48,19 @@ async def ws_live(websocket: WebSocket, residentId: Optional[str] = Query(defaul
 
 
 @router.websocket('/ws/voice-agent')
-async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query(default='r1')):
+async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query(default='r_1')):
     await websocket.accept()
     pipeline = VoiceSqlPipeline()
+    settings = get_settings()
     db = SessionLocal()
+<<<<<<< HEAD
     active_resident_id = str(residentId or 'r1')
     active_liveavatar_session_id: Optional[str] = None
+=======
+    allowed_resident_id = str(settings.ingest_allowed_resident_id or 'r_1').strip()
+    initial_resident = str(residentId or allowed_resident_id).strip() or allowed_resident_id
+    active_resident_id = allowed_resident_id if initial_resident != allowed_resident_id else initial_resident
+>>>>>>> c61e0a3 (feat: add voice sql pipeline retention and websocket/ingest updates)
 
     async def _send(payload: dict[str, Any]) -> None:
         await websocket.send_json(payload)
@@ -90,24 +101,43 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
             sql_started = time.perf_counter()
             await _debug('sql', 'Generating SQL from transcript')
             sql = await pipeline.generate_sql(transcript, active_resident_id)
-            await _debug('sql', 'SQL generated', sql=sql, elapsed_ms=int((time.perf_counter() - sql_started) * 1000))
+            await _debug(
+                'sql',
+                'SQL generated',
+                sql=sql,
+                elapsed_ms=int((time.perf_counter() - sql_started) * 1000),
+                intent=pipeline.last_sql_intent,
+                template_hit=pipeline.last_sql_template_hit,
+                cache_hit=pipeline.last_sql_cache_hit,
+                sql_prompt_chars=pipeline.last_sql_prompt_chars,
+            )
             await _send({'type': 'sql_generated', 'sql': sql})
 
             query_started = time.perf_counter()
-            rows = pipeline.execute_sql(db, sql)
+            rows = pipeline.execute_sql(db, sql, resident_id=active_resident_id)
             await _debug('sql', 'SQL executed', row_count=len(rows), elapsed_ms=int((time.perf_counter() - query_started) * 1000))
             await _send({'type': 'sql_result', 'row_count': len(rows), 'rows_preview': rows[:5]})
 
             answer_started = time.perf_counter()
             await _debug('answer', 'Generating answer text')
+            question_normalized = transcript.lower()
+            include_realtime = any(k in question_normalized for k in ('right now', 'currently', 'now', 'at the moment'))
+            realtime_summary = merged_state.get(active_resident_id) if include_realtime else None
             answer = await pipeline.generate_answer(
                 question=transcript,
                 resident_id=active_resident_id,
                 sql=sql,
                 rows=rows,
+                realtime_summary=realtime_summary if isinstance(realtime_summary, dict) else None,
             )
             timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
-            await _debug('answer', 'Answer generated', answer_chars=len(answer), elapsed_ms=int((time.perf_counter() - answer_started) * 1000))
+            await _debug(
+                'answer',
+                'Answer generated',
+                answer_chars=len(answer),
+                elapsed_ms=int((time.perf_counter() - answer_started) * 1000),
+                answer_prompt_chars=pipeline.last_answer_prompt_chars,
+            )
             await _send({'type': 'agent_response', 'text': answer})
             timeline_ms['tts_start_ms'] = int(time.time() * 1000)
             await _send({'type': 'audio_start', 'sample_rate_hz': 24000})
@@ -179,6 +209,10 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                         elapsed_ms=int((time.perf_counter() - avatar_sync_started) * 1000),
                     )
             timeline_ms['turn_completed_ms'] = int(time.time() * 1000)
+            timeline_ms['sql_prompt_chars'] = int(pipeline.last_sql_prompt_chars or 0)
+            timeline_ms['answer_prompt_chars'] = int(pipeline.last_answer_prompt_chars or 0)
+            timeline_ms['template_hit'] = bool(pipeline.last_sql_template_hit)
+            timeline_ms['cache_hit'] = bool(pipeline.last_sql_cache_hit)
             await _send({'type': 'latency_metrics', 'metrics': timeline_ms})
             await _debug('turn', 'Completed turn', elapsed_ms=int((time.perf_counter() - turn_started) * 1000))
         except Exception as exc:
@@ -288,6 +322,9 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 maybe_resident = str(payload.get('resident_id') or '').strip()
                 maybe_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip()
                 if maybe_resident:
+                    if maybe_resident != allowed_resident_id:
+                        await _send({'type': 'error', 'error': f'Only resident_id={allowed_resident_id} is allowed in this deployment'})
+                        continue
                     active_resident_id = maybe_resident
                 if maybe_liveavatar_session_id:
                     active_liveavatar_session_id = maybe_liveavatar_session_id

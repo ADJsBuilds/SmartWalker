@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
@@ -36,6 +37,27 @@ Epoch integer columns:
 Never call DATE(...) directly on these integer columns.
 Use to_timestamp(column)::date for date comparisons.
 """.strip()
+
+_SCHEMA_ACTIVITY = """
+Tables:
+- exercise_metric_samples(resident_id, ts, step_count, steps_merged, cadence_spm, step_var, fall_suspected, activity_state)
+- daily_metric_rollups(resident_id, date, sample_count, steps_max, cadence_sum, cadence_count, fall_count)
+""".strip()
+
+_SCHEMA_SAFETY = """
+Tables:
+- ingest_events(resident_id, ts, event_type, severity, payload_json, created_at)
+- hourly_metric_rollups(resident_id, bucket_start_ts, date, fall_count, tilt_spike_count, heavy_lean_count, inactivity_count)
+- daily_metric_rollups(resident_id, date, fall_count, tilt_spike_count, heavy_lean_count, inactivity_count)
+""".strip()
+
+_SCHEMA_SESSION = """
+Tables:
+- walking_sessions(resident_id, start_ts, end_ts, summary_json)
+- exercise_metric_samples(resident_id, ts, steps_merged, step_count, cadence_spm, activity_state, fall_suspected)
+""".strip()
+
+_SQL_CACHE: Dict[str, tuple[float, str]] = {}
 
 
 def _extract_output_text(payload: Dict[str, Any]) -> str:
@@ -78,9 +100,57 @@ def _normalize_postgres_epoch_date_usage(sql: str) -> str:
     return normalized
 
 
+def _normalize_question(question: str) -> str:
+    return ' '.join(str(question or '').strip().lower().split())
+
+
+def _classify_question_intent(question: str) -> str:
+    q = _normalize_question(question)
+    if any(k in q for k in ('fall', 'trip', 'tilt', 'risk', 'safe', 'safety', 'inactivity')):
+        return 'safety'
+    if any(k in q for k in ('session', 'walk duration', 'how long', 'workout')):
+        return 'session'
+    return 'activity'
+
+
+def _schema_for_intent(intent: str) -> str:
+    if intent == 'safety':
+        return _SCHEMA_SAFETY
+    if intent == 'session':
+        return _SCHEMA_SESSION
+    return _SCHEMA_ACTIVITY
+
+
+def _template_sql(question: str, resident_id: str) -> Optional[str]:
+    q = _normalize_question(question)
+    esc_id = resident_id.replace("'", "''")
+    if ('how many' in q or 'count' in q) and 'step' in q and 'today' in q:
+        return (
+            "SELECT "
+            "COALESCE(MAX(steps_merged), MAX(step_count), 0) AS steps_today, "
+            "COUNT(*) AS samples_today "
+            f"FROM exercise_metric_samples WHERE resident_id = '{esc_id}' "
+            "AND to_timestamp(ts)::date = CURRENT_DATE"
+        )
+    if 'fall' in q and 'today' in q:
+        return (
+            "SELECT "
+            "COUNT(*) FILTER (WHERE fall_suspected) AS fall_suspected_samples_today, "
+            "COALESCE(MAX(fall_count), 0) AS fall_count_today "
+            f"FROM exercise_metric_samples WHERE resident_id = '{esc_id}' "
+            "AND to_timestamp(ts)::date = CURRENT_DATE"
+        )
+    return None
+
+
 class VoiceSqlPipeline:
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.last_sql_prompt_chars = 0
+        self.last_answer_prompt_chars = 0
+        self.last_sql_intent = 'activity'
+        self.last_sql_cache_hit = False
+        self.last_sql_template_hit = False
 
     def _headers(self) -> Dict[str, str]:
         api_key = (self.settings.openai_api_key or '').strip()
@@ -125,6 +195,22 @@ class VoiceSqlPipeline:
         if not api_key:
             raise RuntimeError('OPENAI_API_KEY is not configured')
         model = (self.settings.openai_sql_model or 'gpt-5-mini').strip()
+        self.last_sql_cache_hit = False
+        self.last_sql_template_hit = False
+        self.last_sql_intent = _classify_question_intent(question)
+        if self.settings.openai_enable_template_sql:
+            templated = _template_sql(question, resident_id)
+            if templated:
+                self.last_sql_template_hit = True
+                return _normalize_postgres_epoch_date_usage(templated)
+        cache_key = f"{resident_id}:{_normalize_question(question)}:{self.last_sql_intent}"
+        cache_ttl = max(0, int(self.settings.openai_sql_cache_ttl_seconds or 0))
+        if cache_ttl > 0:
+            cached = _SQL_CACHE.get(cache_key)
+            now = time.time()
+            if cached and (now - cached[0]) <= cache_ttl:
+                self.last_sql_cache_hit = True
+                return cached[1]
         instruction = (
             "You are a text-to-SQL generator. Output JSON only with shape "
             '{"sql":"...","summary":"..."}. '
@@ -148,8 +234,9 @@ class VoiceSqlPipeline:
             f"resident_id: {resident_id}\n"
             f"question: {question}\n\n"
             f"{postgres_hints}\n\n"
-            f"schema:\n{_SCHEMA_CONTEXT}"
+            f"schema:\n{_schema_for_intent(self.last_sql_intent)}"
         )
+        self.last_sql_prompt_chars = len(user_text) + len(instruction)
         payload = {
             'model': model,
             'input': [
@@ -182,10 +269,22 @@ class VoiceSqlPipeline:
         sql = str(parsed.get('sql') or '').strip().rstrip(';')
         if not sql:
             raise RuntimeError('Generated SQL is empty')
-        return _normalize_postgres_epoch_date_usage(sql)
+        normalized_sql = _normalize_postgres_epoch_date_usage(sql)
+        if cache_ttl > 0:
+            _SQL_CACHE[cache_key] = (time.time(), normalized_sql)
+        return normalized_sql
 
-    def execute_sql(self, db: Session, sql: str) -> List[Dict[str, Any]]:
+    def execute_sql(self, db: Session, sql: str, resident_id: Optional[str] = None) -> List[Dict[str, Any]]:
         sql = _normalize_postgres_epoch_date_usage(sql)
+        lowered = sql.lower()
+        if not lowered.strip().startswith('select'):
+            raise RuntimeError('Only SELECT queries are allowed in voice pipeline')
+        if resident_id:
+            rid = str(resident_id).strip().replace("'", "''")
+            if 'resident_id' not in lowered:
+                raise RuntimeError('Generated SQL missing resident_id filter for single-resident mode')
+            if f"'{rid.lower()}'" not in lowered:
+                raise RuntimeError('Generated SQL does not target active resident_id')
         try:
             result = db.execute(text(sql))
         except SQLAlchemyError as exc:
@@ -195,7 +294,7 @@ class VoiceSqlPipeline:
             db.commit()
             return [{'rows_affected': int(result.rowcount or 0)}]
 
-        rows = result.fetchmany(50)
+        rows = result.fetchmany(max(1, int(self.settings.openai_max_rows_per_query or 30)))
         keys = list(result.keys())
         output: List[Dict[str, Any]] = []
         for row in rows:
@@ -209,7 +308,15 @@ class VoiceSqlPipeline:
             output.append(row_map)
         return output
 
-    async def generate_answer(self, *, question: str, resident_id: str, sql: str, rows: List[Dict[str, Any]]) -> str:
+    async def generate_answer(
+        self,
+        *,
+        question: str,
+        resident_id: str,
+        sql: str,
+        rows: List[Dict[str, Any]],
+        realtime_summary: Optional[Dict[str, Any]] = None,
+    ) -> str:
         api_key = (self.settings.openai_api_key or '').strip()
         if not api_key:
             raise RuntimeError('OPENAI_API_KEY is not configured')
@@ -218,13 +325,20 @@ class VoiceSqlPipeline:
             "You are a concise physical therapy assistant for SmartWalker. "
             "Answer based on SQL results only. If data is sparse, say so clearly."
         )
+        bounded_rows = rows[: max(1, int(self.settings.openai_max_rows_per_query or 30))]
         user = (
             f"resident_id: {resident_id}\n"
             f"question: {question}\n"
             f"sql: {sql}\n"
-            f"rows: {json.dumps(rows, ensure_ascii=True)}\n\n"
+            + (
+                f"realtime_summary: {json.dumps(realtime_summary, ensure_ascii=True)}\n"
+                if isinstance(realtime_summary, dict) and realtime_summary
+                else ''
+            )
+            + f"rows: {json.dumps(bounded_rows, ensure_ascii=True)}\n\n"
             "Return 2-4 short sentences that are easy to speak aloud."
         )
+        self.last_answer_prompt_chars = len(system) + len(user)
         payload = {
             'model': model,
             'input': [
