@@ -190,6 +190,30 @@ export interface ElevenSessionResponse {
   signed_url: string;
 }
 
+export interface ExerciseContextWindowResponse {
+  residentId: string;
+  currentTs?: number | null;
+  currentStep?: number | null;
+  goalSteps: number;
+  stepsRemaining: number;
+  goalProgressPct: number;
+  windowSampleCount: number;
+  windowStartTs?: number | null;
+  windowEndTs?: number | null;
+  cadenceAvg?: number | null;
+  cadenceDelta?: number | null;
+  tiltAvg?: number | null;
+  tiltMax?: number | null;
+  fallSuspectedCount: number;
+  postureTop?: string | null;
+  recentEvents: Array<{
+    ts: number;
+    eventType: string;
+    severity: string;
+  }>;
+  promptText: string;
+}
+
 export interface LiveAvatarLiteBridgeSessionResponse {
   ok: boolean;
   session_id?: string;

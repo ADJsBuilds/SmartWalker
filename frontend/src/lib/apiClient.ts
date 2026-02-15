@@ -6,6 +6,7 @@ import type {
   DocumentDetails,
   ElevenSessionResponse,
   ElevenSignedUrlResponse,
+  ExerciseContextWindowResponse,
   ExerciseSuggestionsResponse,
   HeyGenResponse,
   LiveAgentSessionEventResponse,
@@ -177,6 +178,13 @@ export class ApiClient {
   getExerciseSuggestions(residentId: string, days: number = 7): Promise<ExerciseSuggestionsResponse> {
     const params = new URLSearchParams({ residentId, days: String(days) });
     return this.request(`/api/suggestions/exercise-regimen?${params}`, { method: 'GET' });
+  }
+
+  getExerciseContextWindow(residentId: string, options?: { maxSamples?: number; stepWindow?: number }): Promise<ExerciseContextWindowResponse> {
+    const params = new URLSearchParams({ residentId });
+    if (options?.maxSamples != null) params.set('maxSamples', String(options.maxSamples));
+    if (options?.stepWindow != null) params.set('stepWindow', String(options.stepWindow));
+    return this.request(`/api/exercise-metrics/context-window?${params}`, { method: 'GET' });
   }
 
   askAgent(payload: { residentId: string; question: string; conversationId?: string }): Promise<AgentAskResponse> {

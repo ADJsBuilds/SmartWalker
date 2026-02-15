@@ -7,6 +7,7 @@ type SessionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'err
 
 interface ElevenLabsConversationPanelProps {
   apiClient: ApiClient;
+  residentId: string;
   notify: (message: string, level?: 'info' | 'warn' | 'error') => void;
 }
 
@@ -22,7 +23,7 @@ const ELEVEN_USER_INPUT_RATE = 16000;
 const LIVEAVATAR_CHUNK_SECONDS = 1;
 const LIVEAVATAR_CHUNK_BYTES = LIVEAVATAR_TARGET_RATE * 2 * LIVEAVATAR_CHUNK_SECONDS;
 
-export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsConversationPanelProps) {
+export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: ElevenLabsConversationPanelProps) {
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [isTalking, setIsTalking] = useState(false);
   const [debugConversion, setDebugConversion] = useState(false);
@@ -48,6 +49,7 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
   const elevenOutputRateRef = useRef<number>(16000);
   const vadHighFramesRef = useRef(0);
   const vadLowFramesRef = useRef(0);
+  const lastContextFetchAtRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -80,6 +82,28 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
     appendLog('out', `eleven: ${JSON.stringify(payload)}`);
+  };
+
+  const fetchContextPrompt = async (): Promise<string> => {
+    try {
+      const context = await apiClient.getExerciseContextWindow(residentId, { maxSamples: 50, stepWindow: 50 });
+      const text = (context.promptText || '').trim();
+      if (!text) return '';
+      if (text.length <= 650) return text;
+      return `${text.slice(0, 649).trim()}…`;
+    } catch (error) {
+      appendLog('sys', `context unavailable: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return '';
+    }
+  };
+
+  const pushRealtimeContextUpdate = async () => {
+    const now = Date.now();
+    if (now - lastContextFetchAtRef.current < 1000) return;
+    lastContextFetchAtRef.current = now;
+    const contextPrompt = await fetchContextPrompt();
+    if (!contextPrompt) return;
+    sendElevenEvent({ type: 'contextual_update', text: contextPrompt });
   };
 
   const flushLiveAvatarAudio = () => {
@@ -281,6 +305,7 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
         const transcript = extractEventText(msg, ['user_transcript', 'transcript', 'user_text']);
         if (transcript && type.includes('transcript')) {
           setLastUserText(transcript);
+          void pushRealtimeContextUpdate();
         }
         const agentText = extractEventText(msg, ['agent_response', 'response', 'text']);
         if (agentText && (type.includes('agent') || type.includes('response'))) {
@@ -414,11 +439,13 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
     appendLog('sys', 'Disconnected all bridge resources');
   }
 
-  const sendText = () => {
+  const sendText = async () => {
     const text = inputText.trim();
     if (!text) return;
     setLastUserText(text);
-    sendElevenEvent({ type: 'user_message', text });
+    const contextPrompt = await fetchContextPrompt();
+    const contextualText = contextPrompt ? `${contextPrompt}\n\nUser question: ${text}` : text;
+    sendElevenEvent({ type: 'user_message', text: contextualText });
     setInputText('');
   };
 
@@ -494,14 +521,14 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
               value={inputText}
               onChange={(event) => setInputText(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter') sendText();
+                if (event.key === 'Enter') void sendText();
               }}
               placeholder="Optional text input to prompt agent..."
               className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
             />
             <button
               type="button"
-              onClick={sendText}
+              onClick={() => void sendText()}
               disabled={status !== 'connected' || !inputText.trim()}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
             >
