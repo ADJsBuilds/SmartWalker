@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication } from 'livekit-client';
 
-import { createAndStartLiveAvatarLiteSession, getLiveAvatarLiteStatus, stopLiveAvatarLiteSession } from './liveavatarLite';
+import {
+  createLiveAvatarLiteSession,
+  getLiveAvatarLiteStatus,
+  startLiveAvatarLiteSession,
+  stopLiveAvatarLiteSession,
+} from './liveavatarLite';
 
 type WsStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error';
 type AvatarStatus = 'idle' | 'starting' | 'connected' | 'ready' | 'error';
@@ -153,9 +158,16 @@ function AvatarPanel({
   const videoHostRef = useRef<HTMLDivElement | null>(null);
   const roomRef = useRef<Room | null>(null);
   const pollTimerRef = useRef<number | null>(null);
-  const sessionRef = useRef<{ sessionId: string; sessionToken: string | null } | null>(null);
+  const sessionRef = useRef<{ sessionId: string; sessionToken: string | null; agentWsRegistered: boolean } | null>(null);
+  const hasVideoTrackRef = useRef(false);
   const [status, setStatus] = useState<AvatarStatus>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [agentWsRegistered, setAgentWsRegistered] = useState(false);
+  const [backendExists, setBackendExists] = useState(false);
+  const [backendWsConnected, setBackendWsConnected] = useState(false);
+  const [backendReady, setBackendReady] = useState(false);
+  const [backendSessionState, setBackendSessionState] = useState('-');
+  const [backendLastError, setBackendLastError] = useState('');
   const [errorText, setErrorText] = useState('');
 
   const clearPoll = () => {
@@ -170,9 +182,17 @@ function AvatarPanel({
     const poll = async () => {
       try {
         const liveStatus = await getLiveAvatarLiteStatus(baseUrl, activeSessionId);
-        if (liveStatus.ready) {
+        const exists = Boolean(liveStatus.exists);
+        const wsConnected = Boolean(liveStatus.ws_connected);
+        const ready = Boolean(liveStatus.ready);
+        setBackendExists(exists);
+        setBackendWsConnected(wsConnected);
+        setBackendReady(ready);
+        setBackendSessionState(String(liveStatus.session_state || '-'));
+        setBackendLastError(String(liveStatus.last_error || ''));
+        if (ready || hasVideoTrackRef.current) {
           setStatus('ready');
-        } else if (liveStatus.exists) {
+        } else if (exists) {
           setStatus('connected');
         }
         if (liveStatus.last_error) setErrorText(String(liveStatus.last_error));
@@ -186,16 +206,32 @@ function AvatarPanel({
 
   const startSession = async () => {
     if (status === 'starting') return;
+    await stopSession();
     setErrorText('');
+    setSessionId(null);
+    setAgentWsRegistered(false);
+    setBackendExists(false);
+    setBackendWsConnected(false);
+    setBackendReady(false);
+    setBackendSessionState('-');
+    setBackendLastError('');
+    hasVideoTrackRef.current = false;
     setStatus('starting');
     try {
-      const created = await createAndStartLiveAvatarLiteSession(baseUrl);
+      const created = await createLiveAvatarLiteSession(baseUrl);
+      const createdToken = String(created.session_token || '').trim();
+      if (!created.ok || !createdToken) {
+        throw new Error(created.error || 'Failed to create LiveAvatar LITE session');
+      }
+
+      const started = await startLiveAvatarLiteSession(baseUrl, { session_token: createdToken });
       const createdSessionId = String(created.session_id || '').trim();
-      const createdSessionToken = String(created.session_token || '').trim() || null;
-      const livekitUrl = String(created.livekit_url || '').trim();
-      const livekitClientToken = String(created.livekit_client_token || '').trim();
-      if (!created.ok || !createdSessionId || !livekitUrl || !livekitClientToken) {
-        throw new Error(created.error || 'Failed to create/start LiveAvatar LITE session');
+      const startedSessionId = String(started.session_id || createdSessionId).trim();
+      const livekitUrl = String(started.livekit_url || '').trim();
+      const livekitClientToken = String(started.livekit_client_token || '').trim();
+      const registered = Boolean(started.agent_ws_registered);
+      if (!started.ok || !startedSessionId || !livekitUrl || !livekitClientToken) {
+        throw new Error(started.error || 'Failed to start LiveAvatar LITE session');
       }
 
       const host = videoHostRef.current;
@@ -209,7 +245,9 @@ function AvatarPanel({
           if (!hostElement) return;
           const element = track.attach();
           if (track.kind === Track.Kind.Video) {
+            hasVideoTrackRef.current = true;
             element.className = 'avatar-video';
+            setStatus('ready');
           } else {
             element.className = 'avatar-audio';
             const audioEl = element as HTMLAudioElement;
@@ -224,14 +262,22 @@ function AvatarPanel({
       );
       room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
         track.detach().forEach((el: HTMLMediaElement) => el.remove());
+        if (track.kind === Track.Kind.Video) {
+          hasVideoTrackRef.current = false;
+          if (!backendReady) setStatus('connected');
+        }
       });
       await room.connect(livekitUrl, livekitClientToken);
 
-      sessionRef.current = { sessionId: createdSessionId, sessionToken: createdSessionToken };
-      setSessionId(createdSessionId);
-      onSessionChange(createdSessionId);
+      sessionRef.current = { sessionId: startedSessionId, sessionToken: createdToken, agentWsRegistered: registered };
+      setSessionId(startedSessionId);
+      setAgentWsRegistered(registered);
+      onSessionChange(registered ? startedSessionId : null);
       setStatus('connected');
-      startStatusPolling(createdSessionId);
+      if (!registered) {
+        setErrorText('LiveAvatar started but backend manager did not register ws (agent_ws_registered=false). Voice bridge disabled.');
+      }
+      startStatusPolling(startedSessionId);
     } catch (error) {
       setStatus('error');
       setErrorText(error instanceof Error ? error.message : 'Failed to start avatar session');
@@ -254,7 +300,7 @@ function AvatarPanel({
 
     const session = sessionRef.current;
     sessionRef.current = null;
-    if (session?.sessionToken) {
+    if (session && session.sessionToken) {
       try {
         await stopLiveAvatarLiteSession(baseUrl, {
           session_id: session.sessionId,
@@ -275,6 +321,13 @@ function AvatarPanel({
     }
 
     setSessionId(null);
+    setAgentWsRegistered(false);
+    setBackendExists(false);
+    setBackendWsConnected(false);
+    setBackendReady(false);
+    setBackendSessionState('-');
+    setBackendLastError('');
+    hasVideoTrackRef.current = false;
     onSessionChange(null);
     setStatus('idle');
   };
@@ -296,6 +349,11 @@ function AvatarPanel({
       <div className="meta">
         status: <b>{status}</b> | session: <b>{sessionId || '-'}</b>
       </div>
+      <div className="meta">
+        agent_ws_registered: <b>{String(agentWsRegistered)}</b> | exists: <b>{String(backendExists)}</b> | ws_connected:{' '}
+        <b>{String(backendWsConnected)}</b> | ready: <b>{String(backendReady)}</b> | session_state: <b>{backendSessionState}</b>
+      </div>
+      {backendLastError ? <div className="meta">backend_last_error: <b>{backendLastError}</b></div> : null}
       {errorText ? <div className="meta">error: <b>{errorText}</b></div> : null}
       <div className="avatar-host" ref={videoHostRef}>
         <p className="muted">Avatar video will appear here.</p>

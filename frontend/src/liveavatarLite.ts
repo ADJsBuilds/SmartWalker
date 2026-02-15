@@ -4,6 +4,15 @@ export interface LiveAvatarLiteSessionStart {
   session_token?: string;
   livekit_url?: string;
   livekit_client_token?: string;
+  ws_url?: string;
+  agent_ws_registered?: boolean;
+  error?: string;
+}
+
+export interface LiveAvatarLiteSessionCreate {
+  ok: boolean;
+  session_id?: string;
+  session_token?: string;
   error?: string;
 }
 
@@ -34,8 +43,8 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export async function createAndStartLiveAvatarLiteSession(baseUrl: string): Promise<LiveAvatarLiteSessionStart> {
-  const response = await fetch(`${baseUrl}/api/liveavatar/lite/new`, {
+export async function createLiveAvatarLiteSession(baseUrl: string): Promise<LiveAvatarLiteSessionCreate> {
+  const response = await fetch(`${baseUrl}/api/liveavatar/lite/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -55,15 +64,72 @@ export async function createAndStartLiveAvatarLiteSession(baseUrl: string): Prom
     return { ok: false, error: detail || error || `Request failed: ${response.status}` };
   }
 
-  // Backend-normalized response shape.
-  if (typeof raw.session_id === 'string' && typeof raw.livekit_url === 'string' && typeof raw.livekit_client_token === 'string') {
+  if (typeof raw.session_id === 'string' && typeof raw.session_token === 'string') {
     return {
       ok: true,
       session_id: raw.session_id,
-      session_token: typeof raw.session_token === 'string' ? raw.session_token : undefined,
+      session_token: raw.session_token,
+    };
+  }
+
+  return { ok: false, error: 'Unexpected liveavatar create response shape' };
+}
+
+export async function startLiveAvatarLiteSession(baseUrl: string, payload: { session_token: string }): Promise<LiveAvatarLiteSessionStart> {
+  const response = await fetch(`${baseUrl}/api/liveavatar/lite/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  const parsed = text ? safeJsonParse(text) : {};
+  const raw = parsed as Record<string, unknown>;
+
+  if (!response.ok) {
+    const detail = typeof raw.detail === 'string' ? raw.detail : '';
+    const error = typeof raw.error === 'string' ? raw.error : '';
+    return { ok: false, error: detail || error || `Request failed: ${response.status}` };
+  }
+
+  if (
+    typeof raw.session_id === 'string' &&
+    typeof raw.livekit_url === 'string' &&
+    typeof raw.livekit_client_token === 'string'
+  ) {
+    return {
+      ok: true,
+      session_id: raw.session_id,
+      session_token: typeof raw.session_token === 'string' ? raw.session_token : payload.session_token,
       livekit_url: raw.livekit_url,
       livekit_client_token: raw.livekit_client_token,
+      ws_url: typeof raw.ws_url === 'string' ? raw.ws_url : undefined,
+      agent_ws_registered: Boolean(raw.agent_ws_registered),
     };
+  }
+
+  return { ok: false, error: 'Unexpected liveavatar start response shape' };
+}
+
+// Optional fallback/debug helper for passthrough endpoint.
+export async function createAndStartLiveAvatarLiteSessionViaNew(baseUrl: string): Promise<LiveAvatarLiteSessionStart> {
+  const response = await fetch(`${baseUrl}/api/liveavatar/lite/new`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      language: 'en',
+      video_quality: 'high',
+      video_encoding: 'VP8',
+      is_sandbox: false,
+    }),
+  });
+  const text = await response.text();
+  const parsed = text ? safeJsonParse(text) : {};
+  const raw = parsed as Record<string, unknown>;
+
+  if (!response.ok) {
+    const detail = typeof raw.detail === 'string' ? raw.detail : '';
+    const error = typeof raw.error === 'string' ? raw.error : '';
+    return { ok: false, error: detail || error || `Request failed: ${response.status}` };
   }
 
   // HeyGen raw response shape from /api/liveavatar/lite/new passthrough.
@@ -75,10 +141,11 @@ export async function createAndStartLiveAvatarLiteSession(baseUrl: string): Prom
       session_token: typeof data.session_token === 'string' ? data.session_token : undefined,
       livekit_url: data.url,
       livekit_client_token: data.access_token,
+      ws_url: typeof data.ws_url === 'string' ? data.ws_url : undefined,
     };
   }
 
-  return { ok: false, error: 'Unexpected liveavatar response shape' };
+  return { ok: false, error: 'Unexpected liveavatar /lite/new response shape' };
 }
 
 export async function stopLiveAvatarLiteSession(
