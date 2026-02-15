@@ -85,27 +85,48 @@ class LiteAgentManager:
             return {'ok': False, 'error': 'session not ready for speak'}
 
         event_id = _event_id()
+        stream_start = await self.start_speak_stream(session_id=session_id, event_id=event_id)
+        if not stream_start.get('ok'):
+            return stream_start
+
         sent_chunks = 0
         for chunk in chunk_pcm_bytes(pcm_audio, sample_rate_hz=24000, seconds_per_chunk=seconds_per_chunk):
-            encoded = b64_encode_pcm_chunk(chunk)
-            if len(encoded.encode('utf-8')) > 1_000_000:
-                return {'ok': False, 'error': 'audio chunk exceeds 1MB encoded payload limit'}
-            result = await self._send_control(
-                session_id,
-                {'type': 'agent.speak', 'audio': encoded, 'event_id': event_id},
-                require_ready=False,
-            )
+            result = await self.send_speak_chunk(session_id=session_id, pcm_chunk=chunk, event_id=event_id)
             if not result.get('ok'):
                 return result
             sent_chunks += 1
-        end_result = await self._send_control(
+        end_result = await self.end_speak_stream(session_id=session_id, event_id=event_id)
+        if not end_result.get('ok'):
+            return end_result
+        return {'ok': True, 'event_id': event_id, 'chunk_count': sent_chunks}
+
+    async def start_speak_stream(self, *, session_id: str, event_id: Optional[str] = None) -> Dict[str, Any]:
+        resolved_event_id = (event_id or '').strip() or _event_id()
+        result = await self._send_control(
+            session_id,
+            {'type': 'agent.interrupt', 'event_id': resolved_event_id},
+            require_ready=False,
+        )
+        if not result.get('ok'):
+            return result
+        return {'ok': True, 'event_id': resolved_event_id}
+
+    async def send_speak_chunk(self, *, session_id: str, pcm_chunk: bytes, event_id: str) -> Dict[str, Any]:
+        encoded = b64_encode_pcm_chunk(pcm_chunk)
+        if len(encoded.encode('utf-8')) > 1_000_000:
+            return {'ok': False, 'error': 'audio chunk exceeds 1MB encoded payload limit'}
+        return await self._send_control(
+            session_id,
+            {'type': 'agent.speak', 'audio': encoded, 'event_id': event_id},
+            require_ready=False,
+        )
+
+    async def end_speak_stream(self, *, session_id: str, event_id: str) -> Dict[str, Any]:
+        return await self._send_control(
             session_id,
             {'type': 'agent.speak_end', 'event_id': event_id},
             require_ready=False,
         )
-        if not end_result.get('ok'):
-            return end_result
-        return {'ok': True, 'event_id': event_id, 'chunk_count': sent_chunks}
 
     async def _connect_ws(self, state: LiteAgentState) -> None:
         try:

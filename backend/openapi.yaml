@@ -2350,10 +2350,12 @@ x-websockets:
       description: |
         Client can use either:
         1) Legacy one-shot audio (`user_audio` with base64), or
-        2) Chunked streaming mode:
-           - send `user_audio_start` (JSON)
-           - send repeated `user_audio_chunk_meta` (JSON) followed by binary websocket frame bytes
-           - send `user_audio_end` (JSON)
+        2) Push-to-talk chunked streaming mode:
+           - hold-to-talk pressed -> send `user_audio_start` (JSON)
+           - while held -> send repeated `user_audio_chunk_meta` (JSON) + binary websocket frame bytes
+           - release hold-to-talk -> send `user_audio_end` (JSON)
+        During output, backend streams OpenAI PCM chunks to browser `audio_chunk` events and, when a
+        linked LiveAvatar session exists, forwards chunks in real time to provider `agent.speak` events.
       query:
         residentId:
           type: string
@@ -2568,6 +2570,9 @@ x-websockets:
               - sql
               - answer
               - tts
+              - liveavatar_stream_start
+              - liveavatar_stream_ok
+              - liveavatar_stream_error
               - turn
               - error
             message:

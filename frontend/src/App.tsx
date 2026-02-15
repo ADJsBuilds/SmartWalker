@@ -363,10 +363,18 @@ function AvatarPanel({
 }
 
 function VoiceAgentPanel({ baseUrl, liveavatarSessionId }: { baseUrl: string; liveavatarSessionId: string | null }) {
+  const STREAM_TIMESLICE_MS = 140;
+  const STREAM_BUFFER_CAP_BYTES = 2_000_000;
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
+  const activeUtteranceRef = useRef<{
+    sessionId: string;
+    sequenceNumber: number;
+    droppedChunks: number;
+    speechEndMs: number | null;
+    lastChunkSentMs: number | null;
+  } | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const nextStartRef = useRef(0);
 
@@ -446,6 +454,8 @@ function VoiceAgentPanel({ baseUrl, liveavatarSessionId }: { baseUrl: string; li
       setStatus('closed');
       push('sys', 'closed');
       wsRef.current = null;
+      setIsRecording(false);
+      activeUtteranceRef.current = null;
     };
     ws.onmessage = (event) => {
       let msg: unknown;
@@ -476,9 +486,9 @@ function VoiceAgentPanel({ baseUrl, liveavatarSessionId }: { baseUrl: string; li
       }
       if (type === 'debug') {
         const stage = String(rec.stage || '');
-        if (stage === 'liveavatar_sync_start') setAvatarSync('syncing');
-        if (stage === 'liveavatar_sync_ok') setAvatarSync('ok');
-        if (stage === 'liveavatar_sync_error') setAvatarSync('error');
+        if (stage === 'liveavatar_stream_start') setAvatarSync('syncing');
+        if (stage === 'liveavatar_stream_ok') setAvatarSync('ok');
+        if (stage === 'liveavatar_stream_error') setAvatarSync('error');
       }
     };
   };
@@ -495,7 +505,7 @@ function VoiceAgentPanel({ baseUrl, liveavatarSessionId }: { baseUrl: string; li
     wsRef.current = null;
     if (recorderRef.current && recorderRef.current.state === 'recording') recorderRef.current.stop();
     recorderRef.current = null;
-    chunksRef.current = [];
+    activeUtteranceRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -520,78 +530,122 @@ function VoiceAgentPanel({ baseUrl, liveavatarSessionId }: { baseUrl: string; li
     push('out', compactPayload(msg));
   };
 
-  const blobToBase64 = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const value = String(reader.result || '');
-        const idx = value.indexOf(',');
-        if (idx < 0) {
-          reject(new Error('failed to encode audio'));
-          return;
-        }
-        resolve(value.slice(idx + 1));
-      };
-      reader.onerror = () => reject(new Error('failed to read blob'));
-      reader.readAsDataURL(blob);
-    });
-
-  const startOrStopRecording = async () => {
+  const startHoldToTalk = async () => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (recorderRef.current && recorderRef.current.state === 'recording') {
-      recorderRef.current.stop();
+    if (recorderRef.current && recorderRef.current.state === 'recording') return;
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      push('sys', 'microphone recording unsupported in this browser');
       return;
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    const preferred = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
-    const mimeType = preferred.find((m) => MediaRecorder.isTypeSupported(m));
-    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    recorderRef.current = recorder;
-    chunksRef.current = [];
+    try {
+      setIsTranscribing(false);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const preferred = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+      const mimeType = preferred.find((m) => MediaRecorder.isTypeSupported(m));
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      recorderRef.current = recorder;
 
-    recorder.ondataavailable = (e: BlobEvent) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-    recorder.onerror = () => {
+      const trackSettings = stream.getAudioTracks()[0]?.getSettings?.() || {};
+      const sampleRate = Number(trackSettings.sampleRate || 48000);
+      const channels = Number(trackSettings.channelCount || 1);
+      const utterance = {
+        sessionId: `utt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        sequenceNumber: 0,
+        droppedChunks: 0,
+        speechEndMs: null as number | null,
+        lastChunkSentMs: null as number | null,
+      };
+      activeUtteranceRef.current = utterance;
+
+      const startPayload: Record<string, unknown> = {
+        type: 'user_audio_start',
+        session_id: utterance.sessionId,
+        codec: mimeType || recorder.mimeType || 'audio/webm',
+        sample_rate: Number.isFinite(sampleRate) ? sampleRate : 48000,
+        channels: Number.isFinite(channels) ? channels : 1,
+        timestamp_ms: Date.now(),
+        resident_id: residentId.trim() || 'r1',
+      };
+      if (liveavatarSessionId) startPayload.liveavatar_session_id = liveavatarSessionId;
+      ws.send(JSON.stringify(startPayload));
+      push('out', compactPayload(startPayload));
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size <= 0) return;
+        const current = activeUtteranceRef.current;
+        const openWs = wsRef.current;
+        if (!current || !openWs || openWs.readyState !== WebSocket.OPEN) return;
+        if (openWs.bufferedAmount > STREAM_BUFFER_CAP_BYTES) {
+          current.droppedChunks += 1;
+          if (current.droppedChunks % 10 === 1) push('sys', `audio backpressure dropping chunks=${current.droppedChunks}`);
+          return;
+        }
+        current.sequenceNumber += 1;
+        current.lastChunkSentMs = Date.now();
+        const metaPayload = {
+          type: 'user_audio_chunk_meta',
+          session_id: current.sessionId,
+          sequence_number: current.sequenceNumber,
+          byte_length: event.data.size,
+          timestamp_ms: Date.now(),
+        };
+        openWs.send(JSON.stringify(metaPayload));
+        push('out', compactPayload(metaPayload));
+        openWs.send(event.data);
+      };
+      recorder.onerror = () => {
+        setIsRecording(false);
+        setIsTranscribing(false);
+        push('sys', 'recorder error');
+      };
+      recorder.onstop = () => {
+        const current = activeUtteranceRef.current;
+        if (current && current.speechEndMs === null) current.speechEndMs = Date.now();
+        setIsRecording(false);
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        if (!current) return;
+        const openWs = wsRef.current;
+        if (!openWs || openWs.readyState !== WebSocket.OPEN) {
+          activeUtteranceRef.current = null;
+          return;
+        }
+        const endPayload: Record<string, unknown> = {
+          type: 'user_audio_end',
+          session_id: current.sessionId,
+          last_sequence_number: current.sequenceNumber,
+          timestamp_ms: Date.now(),
+          speech_end_ms: current.speechEndMs,
+          last_chunk_sent_ms: current.lastChunkSentMs,
+          resident_id: residentId.trim() || 'r1',
+        };
+        if (liveavatarSessionId) endPayload.liveavatar_session_id = liveavatarSessionId;
+        openWs.send(JSON.stringify(endPayload));
+        push('out', compactPayload(endPayload));
+        activeUtteranceRef.current = null;
+        setIsTranscribing(true);
+        setLatestTranscript('Transcribing audio...');
+      };
+
+      setIsRecording(true);
+      recorder.start(STREAM_TIMESLICE_MS);
+      push('sys', 'hold-to-talk recording started');
+    } catch (error) {
       setIsRecording(false);
       setIsTranscribing(false);
-      push('sys', 'recorder error');
-    };
-    recorder.onstop = () => {
-      const finalMime = recorder.mimeType || mimeType || 'audio/webm';
-      const blob = new Blob(chunksRef.current, { type: finalMime });
-      chunksRef.current = [];
-      setIsRecording(false);
-      stream.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      if (!blob.size) return;
-      setIsTranscribing(true);
-      setLatestTranscript('Transcribing audio...');
-      void (async () => {
-        try {
-          const audioBase64 = await blobToBase64(blob);
-          const msg = {
-            type: 'user_audio',
-            resident_id: residentId.trim() || 'r1',
-            mime_type: blob.type || finalMime,
-            audio_base64: audioBase64,
-          } as Record<string, unknown>;
-          if (liveavatarSessionId) msg.liveavatar_session_id = liveavatarSessionId;
-          ws.send(JSON.stringify(msg));
-          push('out', compactPayload(msg));
-        } catch (err) {
-          setIsTranscribing(false);
-          push('sys', err instanceof Error ? err.message : 'audio send failed');
-        }
-      })();
-    };
+      push('sys', error instanceof Error ? error.message : 'failed to start recording');
+    }
+  };
 
-    setIsRecording(true);
-    recorder.start(250);
-    push('sys', 'recording started');
+  const endHoldToTalk = () => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'recording') return;
+    recorder.stop();
+    push('sys', 'hold-to-talk released');
   };
 
   const ping = () => {
@@ -617,7 +671,14 @@ function VoiceAgentPanel({ baseUrl, liveavatarSessionId }: { baseUrl: string; li
       <div className="row">
         <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask a text question" />
         <button onClick={sendText}>Send Text</button>
-        <button onClick={() => void startOrStopRecording()}>{isRecording ? 'Stop Recording' : 'Record Audio'}</button>
+        <button
+          onPointerDown={() => void startHoldToTalk()}
+          onPointerUp={endHoldToTalk}
+          onPointerCancel={endHoldToTalk}
+          onPointerLeave={endHoldToTalk}
+        >
+          {isRecording ? 'Release to Send' : 'Hold to Talk'}
+        </button>
       </div>
       <div className="meta">status: <b>{status}</b> | mic: <b>{statusText}</b> | avatar sync: <b>{avatarSync}</b></div>
       <div className="panel transcript">

@@ -145,12 +145,39 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
             tts_started = time.perf_counter()
             chunk_count = 0
             total_pcm_bytes = 0
-            pcm_accumulator = bytearray()
+            avatar_stream_enabled = False
+            avatar_stream_event_id: Optional[str] = None
+            avatar_stream_chunks = 0
+            avatar_stream_start_ms = 0
+
+            if effective_liveavatar_session_id:
+                status = lite_agent_manager.get_status(effective_liveavatar_session_id)
+                await _debug(
+                    'liveavatar_stream_start',
+                    'Preparing real-time avatar stream',
+                    session_id=effective_liveavatar_session_id,
+                    session_exists=bool(status.get('exists')),
+                    ws_connected=bool(status.get('ws_connected')),
+                    ready=bool(status.get('ready')),
+                    session_state=status.get('session_state'),
+                )
+                stream_start = await lite_agent_manager.start_speak_stream(session_id=effective_liveavatar_session_id)
+                if stream_start.get('ok'):
+                    avatar_stream_enabled = True
+                    avatar_stream_event_id = str(stream_start.get('event_id') or '').strip() or None
+                    avatar_stream_start_ms = int(time.time() * 1000)
+                else:
+                    await _debug(
+                        'liveavatar_stream_error',
+                        'Failed to initialize avatar stream; continuing browser-only audio',
+                        session_id=effective_liveavatar_session_id,
+                        error=stream_start.get('error'),
+                    )
+
             await _debug('tts', 'Starting TTS audio stream')
             async for pcm_chunk in pipeline.stream_tts_pcm(answer):
                 chunk_count += 1
                 total_pcm_bytes += len(pcm_chunk)
-                pcm_accumulator.extend(pcm_chunk)
                 await _send(
                     {
                         'type': 'audio_chunk',
@@ -158,6 +185,23 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                         'sample_rate_hz': 24000,
                     }
                 )
+                if avatar_stream_enabled and effective_liveavatar_session_id and avatar_stream_event_id:
+                    chunk_result = await lite_agent_manager.send_speak_chunk(
+                        session_id=effective_liveavatar_session_id,
+                        pcm_chunk=pcm_chunk,
+                        event_id=avatar_stream_event_id,
+                    )
+                    if chunk_result.get('ok'):
+                        avatar_stream_chunks += 1
+                    else:
+                        avatar_stream_enabled = False
+                        await _debug(
+                            'liveavatar_stream_error',
+                            'Avatar stream failed mid-turn; continuing browser-only audio',
+                            session_id=effective_liveavatar_session_id,
+                            error=chunk_result.get('error'),
+                            chunk_count=chunk_count,
+                        )
             await _debug(
                 'tts',
                 'TTS audio stream finished',
@@ -166,47 +210,27 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 elapsed_ms=int((time.perf_counter() - tts_started) * 1000),
             )
             await _send({'type': 'audio_end'})
-            if effective_liveavatar_session_id and pcm_accumulator:
-                avatar_sync_started = time.perf_counter()
-                status = lite_agent_manager.get_status(effective_liveavatar_session_id)
-                await _debug(
-                    'liveavatar_sync_start',
-                    'Forwarding synthesized PCM to LiveAvatar session',
+            if avatar_stream_enabled and effective_liveavatar_session_id and avatar_stream_event_id:
+                end_result = await lite_agent_manager.end_speak_stream(
                     session_id=effective_liveavatar_session_id,
-                    bytes_total=len(pcm_accumulator),
-                    session_exists=bool(status.get('exists')),
-                    ws_connected=bool(status.get('ws_connected')),
-                    ready=bool(status.get('ready')),
-                    session_state=status.get('session_state'),
+                    event_id=avatar_stream_event_id,
                 )
-                try:
-                    speak_result = await lite_agent_manager.speak_pcm(
-                        effective_liveavatar_session_id,
-                        bytes(pcm_accumulator),
-                    )
-                    if speak_result.get('ok'):
-                        await _debug(
-                            'liveavatar_sync_ok',
-                            'LiveAvatar sync completed',
-                            session_id=effective_liveavatar_session_id,
-                            chunk_count=speak_result.get('chunk_count'),
-                            elapsed_ms=int((time.perf_counter() - avatar_sync_started) * 1000),
-                        )
-                    else:
-                        await _debug(
-                            'liveavatar_sync_error',
-                            'LiveAvatar sync failed',
-                            session_id=effective_liveavatar_session_id,
-                            error=speak_result.get('error'),
-                            elapsed_ms=int((time.perf_counter() - avatar_sync_started) * 1000),
-                        )
-                except Exception as sync_exc:
+                if end_result.get('ok'):
                     await _debug(
-                        'liveavatar_sync_error',
-                        'LiveAvatar sync raised exception',
+                        'liveavatar_stream_ok',
+                        'Avatar real-time stream completed',
                         session_id=effective_liveavatar_session_id,
-                        error=str(sync_exc),
-                        elapsed_ms=int((time.perf_counter() - avatar_sync_started) * 1000),
+                        chunk_count=avatar_stream_chunks,
+                        stream_started_ms=avatar_stream_start_ms,
+                        stream_ended_ms=int(time.time() * 1000),
+                    )
+                else:
+                    await _debug(
+                        'liveavatar_stream_error',
+                        'Avatar stream end failed',
+                        session_id=effective_liveavatar_session_id,
+                        error=end_result.get('error'),
+                        chunk_count=avatar_stream_chunks,
                     )
             timeline_ms['turn_completed_ms'] = int(time.time() * 1000)
             timeline_ms['sql_prompt_chars'] = int(pipeline.last_sql_prompt_chars or 0)
