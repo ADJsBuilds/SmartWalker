@@ -7,11 +7,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-<<<<<<< HEAD
 from app.agents.lite_agent import lite_agent_manager
-=======
 from app.core.config import get_settings
->>>>>>> c61e0a3 (feat: add voice sql pipeline retention and websocket/ingest updates)
 from app.db.session import SessionLocal
 from app.services.merge_state import merged_state
 from app.services.voice_sql_pipeline import VoiceSqlPipeline
@@ -53,14 +50,10 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
     pipeline = VoiceSqlPipeline()
     settings = get_settings()
     db = SessionLocal()
-<<<<<<< HEAD
-    active_resident_id = str(residentId or 'r1')
-    active_liveavatar_session_id: Optional[str] = None
-=======
     allowed_resident_id = str(settings.ingest_allowed_resident_id or 'r_1').strip()
     initial_resident = str(residentId or allowed_resident_id).strip() or allowed_resident_id
     active_resident_id = allowed_resident_id if initial_resident != allowed_resident_id else initial_resident
->>>>>>> c61e0a3 (feat: add voice sql pipeline retention and websocket/ingest updates)
+    active_liveavatar_session_id: Optional[str] = None
 
     async def _send(payload: dict[str, Any]) -> None:
         await websocket.send_json(payload)
