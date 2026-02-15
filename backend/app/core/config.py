@@ -54,10 +54,12 @@ class Settings(BaseSettings):
     openai_sql_model: str = 'gpt-4o-mini'
     openai_answer_model: str = 'gpt-4o-mini'
     openai_tts_model: str = 'gpt-4o-mini-tts'
-    openai_tts_voice: str = 'alloy'
+    openai_tts_voice: str = 'nova'
     openai_max_rows_per_query: int = 30
     openai_enable_template_sql: bool = True
     openai_sql_cache_ttl_seconds: int = 20
+    voice_action_confirmation_timeout_seconds: int = 20
+    voice_action_enable_llm_fallback: bool = False
     ingest_persist_interval_seconds: int = 5
     ingest_risk_persist_interval_seconds: int = 1
     ingest_store_full_payload_every_n_samples: int = 3

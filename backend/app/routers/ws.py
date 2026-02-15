@@ -10,7 +10,9 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from app.agents.lite_agent import lite_agent_manager
 from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.services.carrier import create_zoom_meeting, resolve_contact, send_meeting_email
 from app.services.merge_state import merged_state
+from app.services.voice_actions import VoiceActionRouter, ZoomActionCandidate, parse_confirmation
 from app.services.voice_sql_pipeline import VoiceSqlPipeline
 from app.services.ws_manager import ConnectionManager
 
@@ -49,11 +51,14 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
     await websocket.accept()
     pipeline = VoiceSqlPipeline()
     settings = get_settings()
+    action_router = VoiceActionRouter(settings=settings)
     db = SessionLocal()
     allowed_resident_id = str(settings.ingest_allowed_resident_id or 'r_1').strip()
     initial_resident = str(residentId or allowed_resident_id).strip() or allowed_resident_id
     active_resident_id = initial_resident
     active_liveavatar_session_id: Optional[str] = None
+    confirmation_timeout_seconds = max(5, int(settings.voice_action_confirmation_timeout_seconds or 20))
+    pending_action: Optional[dict[str, Any]] = None
 
     async def _send(payload: dict[str, Any]) -> None:
         await websocket.send_json(payload)
@@ -67,6 +72,124 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
     def _coerce_resident(value: Any) -> str:
         return str(value or '').strip()
 
+    async def _send_agent_text(
+        *,
+        answer: str,
+        effective_liveavatar_session_id: Optional[str],
+        timeline_ms: dict[str, Any],
+    ) -> None:
+        await _send({'type': 'agent_response', 'text': answer})
+        timeline_ms['tts_start_ms'] = int(time.time() * 1000)
+        # When LiveAvatar is linked, suppress browser TTS playback to avoid duplicate audio.
+        browser_audio_enabled = not bool(effective_liveavatar_session_id)
+        if browser_audio_enabled:
+            await _send({'type': 'audio_start', 'sample_rate_hz': 24000})
+
+        tts_started = time.perf_counter()
+        chunk_count = 0
+        total_pcm_bytes = 0
+        avatar_stream_enabled = False
+        avatar_stream_event_id: Optional[str] = None
+        avatar_stream_chunks = 0
+        avatar_stream_start_ms = 0
+
+        if effective_liveavatar_session_id:
+            status = lite_agent_manager.get_status(effective_liveavatar_session_id)
+            await _debug(
+                'liveavatar_stream_start',
+                'Preparing real-time avatar stream',
+                session_id=effective_liveavatar_session_id,
+                session_exists=bool(status.get('exists')),
+                ws_connected=bool(status.get('ws_connected')),
+                ready=bool(status.get('ready')),
+                session_state=status.get('session_state'),
+            )
+            stream_start = await lite_agent_manager.start_speak_stream(session_id=effective_liveavatar_session_id)
+            if stream_start.get('ok'):
+                avatar_stream_enabled = True
+                avatar_stream_event_id = str(stream_start.get('event_id') or '').strip() or None
+                avatar_stream_start_ms = int(time.time() * 1000)
+            else:
+                await _debug(
+                    'liveavatar_stream_error',
+                    'Failed to initialize avatar stream; continuing browser-only audio',
+                    session_id=effective_liveavatar_session_id,
+                    error=stream_start.get('error'),
+                )
+
+        await _debug('tts', 'Starting TTS audio stream')
+        async for pcm_chunk in pipeline.stream_tts_pcm(answer):
+            chunk_count += 1
+            total_pcm_bytes += len(pcm_chunk)
+            if browser_audio_enabled:
+                await _send(
+                    {
+                        'type': 'audio_chunk',
+                        'audio_base64': base64.b64encode(pcm_chunk).decode('ascii'),
+                        'sample_rate_hz': 24000,
+                    }
+                )
+            if avatar_stream_enabled and effective_liveavatar_session_id and avatar_stream_event_id:
+                chunk_result = await lite_agent_manager.send_speak_chunk(
+                    session_id=effective_liveavatar_session_id,
+                    pcm_chunk=pcm_chunk,
+                    event_id=avatar_stream_event_id,
+                )
+                if chunk_result.get('ok'):
+                    avatar_stream_chunks += 1
+                else:
+                    avatar_stream_enabled = False
+                    await _debug(
+                        'liveavatar_stream_error',
+                        'Avatar stream failed mid-turn; continuing browser-only audio',
+                        session_id=effective_liveavatar_session_id,
+                        error=chunk_result.get('error'),
+                        chunk_count=chunk_count,
+                    )
+        await _debug(
+            'tts',
+            'TTS audio stream finished',
+            chunk_count=chunk_count,
+            total_pcm_bytes=total_pcm_bytes,
+            elapsed_ms=int((time.perf_counter() - tts_started) * 1000),
+        )
+        if browser_audio_enabled:
+            await _send({'type': 'audio_end'})
+        if avatar_stream_enabled and effective_liveavatar_session_id and avatar_stream_event_id:
+            end_result = await lite_agent_manager.end_speak_stream(
+                session_id=effective_liveavatar_session_id,
+                event_id=avatar_stream_event_id,
+            )
+            if end_result.get('ok'):
+                await _debug(
+                    'liveavatar_stream_ok',
+                    'Avatar real-time stream completed',
+                    session_id=effective_liveavatar_session_id,
+                    chunk_count=avatar_stream_chunks,
+                    stream_started_ms=avatar_stream_start_ms,
+                    stream_ended_ms=int(time.time() * 1000),
+                )
+            else:
+                await _debug(
+                    'liveavatar_stream_error',
+                    'Avatar stream end failed',
+                    session_id=effective_liveavatar_session_id,
+                    error=end_result.get('error'),
+                    chunk_count=avatar_stream_chunks,
+                )
+
+    async def _execute_zoom_invite(candidate: ZoomActionCandidate) -> dict[str, Any]:
+        email = resolve_contact(settings, candidate.contact_label)
+        join_url = create_zoom_meeting(settings, candidate.contact_label)
+        send_meeting_email(settings, email, join_url, candidate.contact_label)
+        return {
+            'ok': True,
+            'action': 'zoom_invite',
+            'contactLabel': candidate.contact_label,
+            'sentTo': email,
+            'joinUrl': join_url,
+        }
+
     async def _handle_turn(
         *,
         user_text: Optional[str] = None,
@@ -76,7 +199,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
         liveavatar_session_id: Optional[str] = None,
         resident_id_override: Optional[str] = None,
     ) -> None:
-        nonlocal active_resident_id
+        nonlocal active_resident_id, pending_action
         transcript = (user_text or '').strip()
         effective_liveavatar_session_id = (liveavatar_session_id or '').strip() or None
         effective_resident_id = _coerce_resident(resident_id_override) or active_resident_id
@@ -97,146 +220,246 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 await _send({'type': 'error', 'error': 'No transcript text available'})
                 return
             await _send({'type': 'user_transcript', 'user_transcript': transcript})
+            now_ms = int(time.time() * 1000)
+            answer: str = ''
 
-            sql_started = time.perf_counter()
-            await _debug('sql', 'Generating SQL from transcript')
-            sql = await pipeline.generate_sql(transcript, effective_resident_id)
-            await _debug(
-                'sql',
-                'SQL generated',
-                sql=sql,
-                elapsed_ms=int((time.perf_counter() - sql_started) * 1000),
-                intent=pipeline.last_sql_intent,
-                template_hit=pipeline.last_sql_template_hit,
-                cache_hit=pipeline.last_sql_cache_hit,
-                sql_prompt_chars=pipeline.last_sql_prompt_chars,
-            )
-            await _send({'type': 'sql_generated', 'sql': sql})
-
-            query_started = time.perf_counter()
-            rows = pipeline.execute_sql(db, sql, resident_id=effective_resident_id)
-            await _debug('sql', 'SQL executed', row_count=len(rows), elapsed_ms=int((time.perf_counter() - query_started) * 1000))
-            await _send({'type': 'sql_result', 'row_count': len(rows), 'rows_preview': rows[:5]})
-
-            answer_started = time.perf_counter()
-            await _debug('answer', 'Generating answer text')
-            question_normalized = transcript.lower()
-            include_realtime = any(k in question_normalized for k in ('right now', 'currently', 'now', 'at the moment'))
-            realtime_summary = merged_state.get(effective_resident_id) if include_realtime else None
-            answer = await pipeline.generate_answer(
-                question=transcript,
-                resident_id=effective_resident_id,
-                sql=sql,
-                rows=rows,
-                realtime_summary=realtime_summary if isinstance(realtime_summary, dict) else None,
-            )
-            timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
-            await _debug(
-                'answer',
-                'Answer generated',
-                answer_chars=len(answer),
-                elapsed_ms=int((time.perf_counter() - answer_started) * 1000),
-                answer_prompt_chars=pipeline.last_answer_prompt_chars,
-            )
-            await _send({'type': 'agent_response', 'text': answer})
-            timeline_ms['tts_start_ms'] = int(time.time() * 1000)
-            await _send({'type': 'audio_start', 'sample_rate_hz': 24000})
-
-            tts_started = time.perf_counter()
-            chunk_count = 0
-            total_pcm_bytes = 0
-            avatar_stream_enabled = False
-            avatar_stream_event_id: Optional[str] = None
-            avatar_stream_chunks = 0
-            avatar_stream_start_ms = 0
-
-            if effective_liveavatar_session_id:
-                status = lite_agent_manager.get_status(effective_liveavatar_session_id)
-                await _debug(
-                    'liveavatar_stream_start',
-                    'Preparing real-time avatar stream',
-                    session_id=effective_liveavatar_session_id,
-                    session_exists=bool(status.get('exists')),
-                    ws_connected=bool(status.get('ws_connected')),
-                    ready=bool(status.get('ready')),
-                    session_state=status.get('session_state'),
-                )
-                stream_start = await lite_agent_manager.start_speak_stream(session_id=effective_liveavatar_session_id)
-                if stream_start.get('ok'):
-                    avatar_stream_enabled = True
-                    avatar_stream_event_id = str(stream_start.get('event_id') or '').strip() or None
-                    avatar_stream_start_ms = int(time.time() * 1000)
-                else:
-                    await _debug(
-                        'liveavatar_stream_error',
-                        'Failed to initialize avatar stream; continuing browser-only audio',
-                        session_id=effective_liveavatar_session_id,
-                        error=stream_start.get('error'),
-                    )
-
-            await _debug('tts', 'Starting TTS audio stream')
-            async for pcm_chunk in pipeline.stream_tts_pcm(answer):
-                chunk_count += 1
-                total_pcm_bytes += len(pcm_chunk)
+            if pending_action and now_ms >= int(pending_action.get('expires_at_ms') or 0):
                 await _send(
                     {
-                        'type': 'audio_chunk',
-                        'audio_base64': base64.b64encode(pcm_chunk).decode('ascii'),
-                        'sample_rate_hz': 24000,
+                        'type': 'action_cancelled',
+                        'action': str(pending_action.get('action') or 'unknown'),
+                        'reason': 'timeout',
                     }
                 )
-                if avatar_stream_enabled and effective_liveavatar_session_id and avatar_stream_event_id:
-                    chunk_result = await lite_agent_manager.send_speak_chunk(
-                        session_id=effective_liveavatar_session_id,
-                        pcm_chunk=pcm_chunk,
-                        event_id=avatar_stream_event_id,
+                await _debug('action', 'Pending action expired', action=pending_action)
+                pending_action = None
+
+            if pending_action:
+                confirmation = parse_confirmation(transcript)
+                if confirmation == 'deny':
+                    await _send(
+                        {
+                            'type': 'action_cancelled',
+                            'action': str(pending_action.get('action') or 'unknown'),
+                            'reason': 'user_denied',
+                        }
                     )
-                    if chunk_result.get('ok'):
-                        avatar_stream_chunks += 1
-                    else:
-                        avatar_stream_enabled = False
+                    answer = 'Okay, I cancelled that Zoom request.'
+                    pending_action = None
+                    timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
+                    timeline_ms['sql_prompt_chars'] = 0
+                    timeline_ms['answer_prompt_chars'] = 0
+                    timeline_ms['template_hit'] = False
+                    timeline_ms['cache_hit'] = False
+                    await _send_agent_text(
+                        answer=answer,
+                        effective_liveavatar_session_id=effective_liveavatar_session_id,
+                        timeline_ms=timeline_ms,
+                    )
+                elif confirmation == 'confirm':
+                    candidate = ZoomActionCandidate(
+                        action_type=str(pending_action.get('action') or 'zoom_invite'),
+                        contact_label=str(pending_action.get('contact_label') or ''),
+                        source='confirmation',
+                        confidence=1.0,
+                    )
+                    try:
+                        result = await _execute_zoom_invite(candidate)
+                        await _send({'type': 'action_executed', **result})
+                        answer = f"Done. I sent a Zoom link to {result.get('sentTo')}."
                         await _debug(
-                            'liveavatar_stream_error',
-                            'Avatar stream failed mid-turn; continuing browser-only audio',
-                            session_id=effective_liveavatar_session_id,
-                            error=chunk_result.get('error'),
-                            chunk_count=chunk_count,
+                            'action',
+                            'Zoom invite executed',
+                            contact_label=candidate.contact_label,
+                            sent_to=result.get('sentTo'),
                         )
-            await _debug(
-                'tts',
-                'TTS audio stream finished',
-                chunk_count=chunk_count,
-                total_pcm_bytes=total_pcm_bytes,
-                elapsed_ms=int((time.perf_counter() - tts_started) * 1000),
-            )
-            await _send({'type': 'audio_end'})
-            if avatar_stream_enabled and effective_liveavatar_session_id and avatar_stream_event_id:
-                end_result = await lite_agent_manager.end_speak_stream(
-                    session_id=effective_liveavatar_session_id,
-                    event_id=avatar_stream_event_id,
-                )
-                if end_result.get('ok'):
-                    await _debug(
-                        'liveavatar_stream_ok',
-                        'Avatar real-time stream completed',
-                        session_id=effective_liveavatar_session_id,
-                        chunk_count=avatar_stream_chunks,
-                        stream_started_ms=avatar_stream_start_ms,
-                        stream_ended_ms=int(time.time() * 1000),
+                    except ValueError as exc:
+                        await _send(
+                            {
+                                'type': 'action_executed',
+                                'ok': False,
+                                'action': 'zoom_invite',
+                                'contactLabel': candidate.contact_label,
+                                'error': str(exc),
+                            }
+                        )
+                        answer = f"Sorry, I could not send the Zoom invite. {exc}"
+                        await _debug('action', 'Zoom invite failed with value error', detail=str(exc))
+                    except Exception as exc:
+                        await _send(
+                            {
+                                'type': 'action_executed',
+                                'ok': False,
+                                'action': 'zoom_invite',
+                                'contactLabel': candidate.contact_label,
+                                'error': 'Failed to send Zoom invite.',
+                            }
+                        )
+                        answer = 'Sorry, I could not send the Zoom invite right now.'
+                        await _debug('action', 'Zoom invite failed', detail=str(exc))
+                    finally:
+                        pending_action = None
+
+                    timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
+                    timeline_ms['sql_prompt_chars'] = 0
+                    timeline_ms['answer_prompt_chars'] = 0
+                    timeline_ms['template_hit'] = False
+                    timeline_ms['cache_hit'] = False
+                    await _send_agent_text(
+                        answer=answer,
+                        effective_liveavatar_session_id=effective_liveavatar_session_id,
+                        timeline_ms=timeline_ms,
                     )
                 else:
+                    reminder = (
+                        f"I have a pending Zoom invite for {pending_action.get('contact_label')}. "
+                        "Please say yes to send it or no to cancel."
+                    )
+                    await _send(
+                        {
+                            'type': 'action_confirm_required',
+                            'action': str(pending_action.get('action') or 'zoom_invite'),
+                            'contactLabel': str(pending_action.get('contact_label') or ''),
+                            'timeoutSeconds': confirmation_timeout_seconds,
+                            'prompt': reminder,
+                        }
+                    )
+                    timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
+                    timeline_ms['sql_prompt_chars'] = 0
+                    timeline_ms['answer_prompt_chars'] = 0
+                    timeline_ms['template_hit'] = False
+                    timeline_ms['cache_hit'] = False
+                    await _send_agent_text(
+                        answer=reminder,
+                        effective_liveavatar_session_id=effective_liveavatar_session_id,
+                        timeline_ms=timeline_ms,
+                    )
+            else:
+                candidate = await action_router.detect_zoom_action(transcript)
+                if candidate:
                     await _debug(
-                        'liveavatar_stream_error',
-                        'Avatar stream end failed',
-                        session_id=effective_liveavatar_session_id,
-                        error=end_result.get('error'),
-                        chunk_count=avatar_stream_chunks,
+                        'action',
+                        'Zoom action candidate detected',
+                        source=candidate.source,
+                        contact_label=candidate.contact_label,
+                        confidence=candidate.confidence,
+                    )
+                    try:
+                        resolved_email = resolve_contact(settings, candidate.contact_label)
+                    except ValueError as exc:
+                        await _send(
+                            {
+                                'type': 'action_cancelled',
+                                'action': candidate.action_type,
+                                'contactLabel': candidate.contact_label,
+                                'reason': 'unknown_contact',
+                                'error': str(exc),
+                            }
+                        )
+                        answer = (
+                            f"I could not find a contact named {candidate.contact_label}. "
+                            "Please try again with a saved contact."
+                        )
+                        timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
+                        timeline_ms['sql_prompt_chars'] = 0
+                        timeline_ms['answer_prompt_chars'] = 0
+                        timeline_ms['template_hit'] = False
+                        timeline_ms['cache_hit'] = False
+                        await _send_agent_text(
+                            answer=answer,
+                            effective_liveavatar_session_id=effective_liveavatar_session_id,
+                            timeline_ms=timeline_ms,
+                        )
+                    else:
+                        pending_action = {
+                            'action': candidate.action_type,
+                            'contact_label': candidate.contact_label,
+                            'resolved_email': resolved_email,
+                            'source': candidate.source,
+                            'created_at_ms': now_ms,
+                            'expires_at_ms': now_ms + (confirmation_timeout_seconds * 1000),
+                            'trigger_text': transcript.strip().lower(),
+                        }
+                        prompt = f"I can send a Zoom invite to {candidate.contact_label}. Do you want me to send it now?"
+                        await _send(
+                            {
+                                'type': 'action_detected',
+                                'action': candidate.action_type,
+                                'contactLabel': candidate.contact_label,
+                                'requiresConfirmation': True,
+                                'source': candidate.source,
+                            }
+                        )
+                        await _send(
+                            {
+                                'type': 'action_confirm_required',
+                                'action': candidate.action_type,
+                                'contactLabel': candidate.contact_label,
+                                'timeoutSeconds': confirmation_timeout_seconds,
+                                'prompt': prompt,
+                            }
+                        )
+                        timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
+                        timeline_ms['sql_prompt_chars'] = 0
+                        timeline_ms['answer_prompt_chars'] = 0
+                        timeline_ms['template_hit'] = False
+                        timeline_ms['cache_hit'] = False
+                        await _send_agent_text(
+                            answer=prompt,
+                            effective_liveavatar_session_id=effective_liveavatar_session_id,
+                            timeline_ms=timeline_ms,
+                        )
+                else:
+                    sql_started = time.perf_counter()
+                    await _debug('sql', 'Generating SQL from transcript')
+                    sql = await pipeline.generate_sql(transcript, effective_resident_id)
+                    await _debug(
+                        'sql',
+                        'SQL generated',
+                        sql=sql,
+                        elapsed_ms=int((time.perf_counter() - sql_started) * 1000),
+                        intent=pipeline.last_sql_intent,
+                        template_hit=pipeline.last_sql_template_hit,
+                        cache_hit=pipeline.last_sql_cache_hit,
+                        sql_prompt_chars=pipeline.last_sql_prompt_chars,
+                    )
+                    await _send({'type': 'sql_generated', 'sql': sql})
+
+                    query_started = time.perf_counter()
+                    rows = pipeline.execute_sql(db, sql, resident_id=effective_resident_id)
+                    await _debug('sql', 'SQL executed', row_count=len(rows), elapsed_ms=int((time.perf_counter() - query_started) * 1000))
+                    await _send({'type': 'sql_result', 'row_count': len(rows), 'rows_preview': rows[:5]})
+
+                    answer_started = time.perf_counter()
+                    await _debug('answer', 'Generating answer text')
+                    question_normalized = transcript.lower()
+                    include_realtime = any(k in question_normalized for k in ('right now', 'currently', 'now', 'at the moment'))
+                    realtime_summary = merged_state.get(effective_resident_id) if include_realtime else None
+                    answer = await pipeline.generate_answer(
+                        question=transcript,
+                        resident_id=effective_resident_id,
+                        sql=sql,
+                        rows=rows,
+                        realtime_summary=realtime_summary if isinstance(realtime_summary, dict) else None,
+                    )
+                    timeline_ms['llm_response_ready_ms'] = int(time.time() * 1000)
+                    await _debug(
+                        'answer',
+                        'Answer generated',
+                        answer_chars=len(answer),
+                        elapsed_ms=int((time.perf_counter() - answer_started) * 1000),
+                        answer_prompt_chars=pipeline.last_answer_prompt_chars,
+                    )
+                    await _send_agent_text(
+                        answer=answer,
+                        effective_liveavatar_session_id=effective_liveavatar_session_id,
+                        timeline_ms=timeline_ms,
                     )
             timeline_ms['turn_completed_ms'] = int(time.time() * 1000)
-            timeline_ms['sql_prompt_chars'] = int(pipeline.last_sql_prompt_chars or 0)
-            timeline_ms['answer_prompt_chars'] = int(pipeline.last_answer_prompt_chars or 0)
-            timeline_ms['template_hit'] = bool(pipeline.last_sql_template_hit)
-            timeline_ms['cache_hit'] = bool(pipeline.last_sql_cache_hit)
+            timeline_ms.setdefault('sql_prompt_chars', int(pipeline.last_sql_prompt_chars or 0))
+            timeline_ms.setdefault('answer_prompt_chars', int(pipeline.last_answer_prompt_chars or 0))
+            timeline_ms.setdefault('template_hit', bool(pipeline.last_sql_template_hit))
+            timeline_ms.setdefault('cache_hit', bool(pipeline.last_sql_cache_hit))
             await _send({'type': 'latency_metrics', 'metrics': timeline_ms})
             await _debug('turn', 'Completed turn', elapsed_ms=int((time.perf_counter() - turn_started) * 1000))
         except Exception as exc:

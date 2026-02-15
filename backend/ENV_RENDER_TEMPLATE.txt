@@ -50,6 +50,8 @@ GEMINI_MODEL=gemini-3-flash
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 
 COACH_SCRIPT_COOLDOWN_SECONDS=8
+VOICE_ACTION_CONFIRMATION_TIMEOUT_SECONDS=20
+VOICE_ACTION_ENABLE_LLM_FALLBACK=false
 
 # Carrier / Zoom / Email optional
 ZOOM_ACCOUNT_ID=

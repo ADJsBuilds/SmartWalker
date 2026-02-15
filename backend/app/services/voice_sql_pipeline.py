@@ -383,7 +383,7 @@ class VoiceSqlPipeline:
         if not api_key:
             raise RuntimeError('OPENAI_API_KEY is not configured')
         model = (self.settings.openai_tts_model or 'gpt-4o-mini-tts').strip()
-        voice = (self.settings.openai_tts_voice or 'alloy').strip()
+        voice = (self.settings.openai_tts_voice or 'nova').strip()
         payload = {
             'model': model,
             'voice': voice,
