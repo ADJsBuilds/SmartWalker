@@ -26,6 +26,9 @@ const LIVEAVATAR_CHUNK_BYTES = LIVEAVATAR_TARGET_RATE * 2 * LIVEAVATAR_CHUNK_SEC
 const CONTEXT_CACHE_TTL_MS = 2000;
 const CONTEXT_FETCH_TIMEOUT_MS = 320;
 const QNA_FETCH_TIMEOUT_MS = 320;
+const REALTIME_CONTEXT_MIN_INTERVAL_MS = 5000;
+const REALTIME_CONTEXT_MAX_CHARS = 360;
+const TOOL_RESULT_MAX_CHARS = 480;
 
 export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: ElevenLabsConversationPanelProps) {
   const [status, setStatus] = useState<SessionStatus>('idle');
@@ -67,6 +70,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   const contextCacheRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
   const textTurnTimeoutRef = useRef<number | null>(null);
   const pendingTextTurnRef = useRef<{ id: string; plainText: string; retried: boolean } | null>(null);
+  const providerRecoveryRef = useRef<{ lastSignature: string; attempts: number }>({ lastSignature: '', attempts: 0 });
 
   useEffect(() => {
     return () => {
@@ -163,7 +167,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
       if (!facts) return '';
       const focus = context.recommendedFocus.length ? ` Suggested focus: ${context.recommendedFocus.join(' ')}` : '';
       const envelope = `${facts}${focus} Rows used: ${context.rowsUsed}.`;
-      const clipped = envelope.length <= 780 ? envelope : `${envelope.slice(0, 779).trim()}…`;
+      const clipped = envelope.length <= TOOL_RESULT_MAX_CHARS ? envelope : `${envelope.slice(0, TOOL_RESULT_MAX_CHARS - 1).trim()}…`;
       appendLog('sys', `qna context intent=${context.intent} rows=${context.rowsUsed} stale=${context.staleDataFlag}`);
       return clipped;
     } catch (error) {
@@ -227,12 +231,15 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
 
   const pushRealtimeContextUpdate = async (question?: string) => {
     const now = Date.now();
-    if (now - lastContextFetchAtRef.current < 1000) return;
+    if (now - lastContextFetchAtRef.current < REALTIME_CONTEXT_MIN_INTERVAL_MS) return;
     lastContextFetchAtRef.current = now;
     const qnaContext = question ? await fetchQnaContextBlock(question, { timeoutMs: 260 }) : '';
     const contextPrompt = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 240 });
     if (!contextPrompt) return;
-    sendElevenEvent({ type: 'contextual_update', text: contextPrompt });
+    const realtimeText = contextPrompt.length <= REALTIME_CONTEXT_MAX_CHARS
+      ? contextPrompt
+      : `${contextPrompt.slice(0, REALTIME_CONTEXT_MAX_CHARS - 1).trim()}…`;
+    sendElevenEvent({ type: 'contextual_update', text: realtimeText });
   };
 
   const parseToolCallQuestion = (raw: unknown): string => {
@@ -275,6 +282,31 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
       is_error: false,
     });
     appendLog('sys', `Replied to client_tool_call name=${toolName} id=${toolCallId}`);
+  };
+
+  const maybeRecoverFromProviderError = (msg: Record<string, unknown>) => {
+    const details = (msg.details && typeof msg.details === 'object') ? (msg.details as Record<string, unknown>) : {};
+    const title = String(details.title || '');
+    const detail = String(details.detail || '');
+    const signature = `${title}:${detail}`.slice(0, 200);
+    if (!signature) return;
+
+    const state = providerRecoveryRef.current;
+    if (state.lastSignature !== signature) {
+      providerRecoveryRef.current = { lastSignature: signature, attempts: 0 };
+    }
+    if (providerRecoveryRef.current.attempts >= 1) return;
+
+    const fallbackText = (lastUserText || '').trim();
+    if (!fallbackText) return;
+    const ws = elevenWsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    providerRecoveryRef.current.attempts += 1;
+    window.setTimeout(() => {
+      sendElevenEvent({ type: 'user_message', text: fallbackText });
+      appendLog('sys', 'Recovered provider error by retrying last user text once.');
+    }, 250);
   };
 
   const flushLiveAvatarAudio = () => {
@@ -460,6 +492,16 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
 
         if (type === 'interruption') {
           endAgentTurn();
+          return;
+        }
+
+        if (type === 'error') {
+          clearPendingTextTurn();
+          const details = (msg.details && typeof msg.details === 'object') ? (msg.details as Record<string, unknown>) : {};
+          const title = String(details.title || 'Error');
+          const detail = String(details.detail || '');
+          appendLog('sys', `Eleven error: ${title}${detail ? ` - ${detail}` : ''}`);
+          maybeRecoverFromProviderError(msg);
           return;
         }
 
