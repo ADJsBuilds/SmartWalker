@@ -214,6 +214,32 @@ export interface ExerciseContextWindowResponse {
   promptText: string;
 }
 
+export interface ExerciseQnaContextResponse {
+  residentId: string;
+  question: string;
+  intent: 'progress_summary' | 'status_check' | 'improvement_advice' | 'general';
+  rowsUsed: number;
+  requestedSamples: number;
+  windowStartTs?: number | null;
+  windowEndTs?: number | null;
+  latestTs?: number | null;
+  staleDataFlag: boolean;
+  metrics: {
+    stepDelta?: number | null;
+    cadenceAvg?: number | null;
+    cadenceDelta?: number | null;
+    tiltAvg?: number | null;
+    tiltMax?: number | null;
+    stepVarAvg?: number | null;
+    fallSuspectedCount: number;
+    highTiltCount: number;
+    postureTop?: string | null;
+  };
+  groundingText: string;
+  recommendedFocus: string[];
+  contextBuildMs: number;
+}
+
 export interface LiveAvatarLiteBridgeSessionResponse {
   ok: boolean;
   session_id?: string;

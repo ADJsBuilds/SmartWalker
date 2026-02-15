@@ -7,6 +7,7 @@ import type {
   ElevenSessionResponse,
   ElevenSignedUrlResponse,
   ExerciseContextWindowResponse,
+  ExerciseQnaContextResponse,
   ExerciseSuggestionsResponse,
   HeyGenResponse,
   LiveAgentSessionEventResponse,
@@ -185,6 +186,16 @@ export class ApiClient {
     if (options?.maxSamples != null) params.set('maxSamples', String(options.maxSamples));
     if (options?.stepWindow != null) params.set('stepWindow', String(options.stepWindow));
     return this.request(`/api/exercise-metrics/context-window?${params}`, { method: 'GET' });
+  }
+
+  getExerciseQnaContext(
+    residentId: string,
+    question: string,
+    options?: { maxSamples?: number },
+  ): Promise<ExerciseQnaContextResponse> {
+    const params = new URLSearchParams({ residentId, question });
+    if (options?.maxSamples != null) params.set('maxSamples', String(options.maxSamples));
+    return this.request(`/api/exercise-metrics/qna-context?${params}`, { method: 'GET' });
   }
 
   askAgent(payload: { residentId: string; question: string; conversationId?: string }): Promise<AgentAskResponse> {

@@ -40,6 +40,7 @@ def app_with_db(tmp_path: Path, monkeypatch) -> Generator[tuple, None, None]:
     import app.routers.documents as documents_router_mod
     import app.routers.reports as reports_router_mod
     import app.routers.suggestions as suggestions_router_mod
+    import app.routers.exercise_metrics as exercise_metrics_router_mod
     import app.routers.agent as agent_router_mod
     import app.routers.integrations as integrations_router_mod
     import app.routers.carrier as carrier_router_mod
@@ -56,6 +57,7 @@ def app_with_db(tmp_path: Path, monkeypatch) -> Generator[tuple, None, None]:
     documents_router_mod = importlib.reload(documents_router_mod)
     reports_router_mod = importlib.reload(reports_router_mod)
     suggestions_router_mod = importlib.reload(suggestions_router_mod)
+    exercise_metrics_router_mod = importlib.reload(exercise_metrics_router_mod)
     agent_router_mod = importlib.reload(agent_router_mod)
     integrations_router_mod = importlib.reload(integrations_router_mod)
     carrier_router_mod = importlib.reload(carrier_router_mod)
@@ -100,6 +102,8 @@ def app_with_db(tmp_path: Path, monkeypatch) -> Generator[tuple, None, None]:
     analytics_store._last_event_ts.clear()
     analytics_store._last_steps.clear()
     analytics_store._last_step_change_ts.clear()
+    exercise_metrics_router_mod._context_cache.clear()
+    exercise_metrics_router_mod._qna_context_cache.clear()
 
     try:
         yield app, TestingSessionLocal, tmp_path

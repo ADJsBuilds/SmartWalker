@@ -4,6 +4,7 @@ import { ContextManager } from '../lib/contextManager';
 import { useRealtimeState } from '../store/realtimeState';
 
 type SocketStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+const QNA_FETCH_TIMEOUT_MS = 320;
 
 interface LogEntry {
   id: string;
@@ -13,7 +14,7 @@ interface LogEntry {
 }
 
 export function VoiceAgentPlayground() {
-  const { apiClient, notify } = useRealtimeState();
+  const { activeResidentId, apiClient, notify } = useRealtimeState();
   const [agentId, setAgentId] = useState('');
   const [userId, setUserId] = useState('demo-user');
   const [messageText, setMessageText] = useState('');
@@ -30,6 +31,7 @@ export function VoiceAgentPlayground() {
   const gaitAsymmetryRef = useRef(0.22);
   const tiltWarningRef = useRef(false);
   const connected = socketStatus === 'open';
+  const contextCacheRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
 
   const canSend = useMemo(() => connected && Boolean(messageText.trim()), [connected, messageText]);
 
@@ -150,9 +152,58 @@ export function VoiceAgentPlayground() {
   };
 
   const sendUserMessage = () => {
+    void sendUserMessageAsync();
+  };
+
+  const fetchContextPrompt = async (): Promise<string> => {
+    const now = Date.now();
+    const cached = contextCacheRef.current;
+    if (cached.text && now - cached.ts < 2000) return cached.text;
+    try {
+      const request = apiClient.getExerciseContextWindow(activeResidentId, { maxSamples: 50, stepWindow: 50 });
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('context timeout')), 260);
+      });
+      const context = await Promise.race([request, timeout]);
+      const text = (context.promptText || '').trim();
+      if (!text) return cached.text || '';
+      const clipped = text.length <= 650 ? text : `${text.slice(0, 649).trim()}…`;
+      contextCacheRef.current = { text: clipped, ts: Date.now() };
+      return clipped;
+    } catch {
+      return cached.text || '';
+    }
+  };
+
+  const fetchQnaContextBlock = async (question: string): Promise<string> => {
+    const trimmed = question.trim();
+    if (!trimmed) return '';
+    try {
+      const request = apiClient.getExerciseQnaContext(activeResidentId, trimmed, { maxSamples: 50 });
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('qna context timeout')), QNA_FETCH_TIMEOUT_MS);
+      });
+      const context = await Promise.race([request, timeout]);
+      const facts = (context.groundingText || '').trim();
+      if (!facts) return '';
+      const focus = context.recommendedFocus.length ? ` Suggested focus: ${context.recommendedFocus.join(' ')}` : '';
+      appendLog('sys', { type: 'qna_context', intent: context.intent, rowsUsed: context.rowsUsed, stale: context.staleDataFlag });
+      const merged = `${facts}${focus} Rows used: ${context.rowsUsed}.`;
+      return merged.length <= 780 ? merged : `${merged.slice(0, 779).trim()}…`;
+    } catch {
+      return '';
+    }
+  };
+
+  const sendUserMessageAsync = async () => {
     const text = messageText.trim();
     if (!text) return;
-    sendSocketEvent({ type: 'user_message', text });
+    const qnaContext = await fetchQnaContextBlock(text);
+    const contextPrompt = qnaContext || await fetchContextPrompt();
+    const contextualText = contextPrompt
+      ? `Use only the following exercise context facts when relevant. If data is missing, say so briefly.\nContext: ${contextPrompt}\n\nUser question: ${text}`
+      : text;
+    sendSocketEvent({ type: 'user_message', text: contextualText });
     setMessageText('');
   };
 

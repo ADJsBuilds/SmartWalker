@@ -116,7 +116,13 @@ export class LiveAgentController {
   private async startListeningAsync(): Promise<void> {
     if (!this.room) return;
     if (!this.localAudioTrack) {
-      this.localAudioTrack = await createLocalAudioTrack();
+      this.localAudioTrack = await createLocalAudioTrack({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
+      });
       await this.room.localParticipant.publishTrack(this.localAudioTrack);
       return;
     }

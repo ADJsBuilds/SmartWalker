@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ExerciseMetricSample, IngestEvent
 from app.db.session import get_db
+from app.services.exercise_qna_context import build_exercise_qna_context, classify_question_intent
 
 router = APIRouter(tags=['exercise-metrics'])
 _GOAL_STEPS = 1000
@@ -22,6 +23,9 @@ _CONTEXT_TTL_SECONDS = 2.0
 _CONTEXT_TEXT_MAX_CHARS = 800
 _context_cache_lock = threading.Lock()
 _context_cache: dict[tuple[str, int, int], tuple[float, dict[str, Any]]] = {}
+_QNA_CONTEXT_TTL_SECONDS = 1.0
+_qna_context_cache_lock = threading.Lock()
+_qna_context_cache: dict[tuple[str, int, str, int], tuple[float, dict[str, Any]]] = {}
 
 
 def _row_to_live_item(row: ExerciseMetricSample) -> dict[str, Any]:
@@ -266,6 +270,53 @@ def get_context_window(
     payload = _build_context_summary(residentId, rows, recent_events)
     with _context_cache_lock:
         _context_cache[cache_key] = (now_mono, payload)
+    return payload
+
+
+@router.get('/api/exercise-metrics/qna-context')
+def get_qna_context(
+    residentId: str = Query(..., description='Resident id, e.g. r1'),
+    question: str = Query(..., min_length=1, description='Current user question'),
+    maxSamples: int = Query(50, ge=1, le=100, description='Maximum rows used for Q&A grounding'),
+    db: Session = Depends(get_db),
+):
+    started = time.perf_counter()
+    normalized_intent = classify_question_intent(question)
+    latest_row = (
+        db.query(ExerciseMetricSample)
+        .filter(ExerciseMetricSample.resident_id == residentId)
+        .order_by(ExerciseMetricSample.ts.desc())
+        .first()
+    )
+    latest_ts = int(latest_row.ts) if latest_row else 0
+    cache_key = (residentId, latest_ts, normalized_intent, maxSamples)
+
+    now_mono = time.monotonic()
+    with _qna_context_cache_lock:
+        cached = _qna_context_cache.get(cache_key)
+        if cached and now_mono - cached[0] < _QNA_CONTEXT_TTL_SECONDS:
+            payload = dict(cached[1])
+            payload['contextBuildMs'] = max(1, int((time.perf_counter() - started) * 1000))
+            return payload
+
+    rows = (
+        db.query(ExerciseMetricSample)
+        .filter(ExerciseMetricSample.resident_id == residentId)
+        .order_by(ExerciseMetricSample.ts.desc())
+        .limit(maxSamples)
+        .all()
+    )
+    result = build_exercise_qna_context(
+        resident_id=residentId,
+        question=question,
+        rows=rows,
+        max_samples=maxSamples,
+    )
+    payload = dict(result.payload)
+    payload['contextBuildMs'] = max(1, int((time.perf_counter() - started) * 1000))
+    with _qna_context_cache_lock:
+        cache_ts = int(result.latest_ts) if result.latest_ts is not None else 0
+        _qna_context_cache[(residentId, cache_ts, normalized_intent, maxSamples)] = (now_mono, payload)
     return payload
 
 

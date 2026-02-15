@@ -4,6 +4,7 @@ import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack, type 
 import type { ApiClient } from '../lib/apiClient';
 
 type SessionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
+type CaptureMode = 'ptt' | 'handsfree';
 
 interface ElevenLabsConversationPanelProps {
   apiClient: ApiClient;
@@ -22,10 +23,15 @@ const LIVEAVATAR_TARGET_RATE = 24000;
 const ELEVEN_USER_INPUT_RATE = 16000;
 const LIVEAVATAR_CHUNK_SECONDS = 1;
 const LIVEAVATAR_CHUNK_BYTES = LIVEAVATAR_TARGET_RATE * 2 * LIVEAVATAR_CHUNK_SECONDS;
+const CONTEXT_CACHE_TTL_MS = 2000;
+const CONTEXT_FETCH_TIMEOUT_MS = 320;
+const QNA_FETCH_TIMEOUT_MS = 320;
 
 export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: ElevenLabsConversationPanelProps) {
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [isTalking, setIsTalking] = useState(false);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('ptt');
+  const [pttPressed, setPttPressed] = useState(false);
   const [debugConversion, setDebugConversion] = useState(false);
   const [inputText, setInputText] = useState('');
   const [lastUserText, setLastUserText] = useState('');
@@ -50,6 +56,13 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   const vadHighFramesRef = useRef(0);
   const vadLowFramesRef = useRef(0);
   const lastContextFetchAtRef = useRef(0);
+  const pttPressedRef = useRef(false);
+  const speechActiveRef = useRef(false);
+  const listeningSignaledRef = useRef(false);
+  const noiseFloorRef = useRef(0.01);
+  const speechAttackFramesRef = useRef(0);
+  const speechReleaseFramesRef = useRef(0);
+  const contextCacheRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
 
   useEffect(() => {
     return () => {
@@ -84,24 +97,74 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     appendLog('out', `eleven: ${JSON.stringify(payload)}`);
   };
 
-  const fetchContextPrompt = async (): Promise<string> => {
+  const fetchContextPrompt = async (options?: { preferCache?: boolean; timeoutMs?: number }): Promise<string> => {
+    const preferCache = options?.preferCache ?? true;
+    const timeoutMs = Math.max(80, options?.timeoutMs ?? CONTEXT_FETCH_TIMEOUT_MS);
+    const now = Date.now();
+    const cached = contextCacheRef.current;
+    if (preferCache && cached.text && now - cached.ts <= CONTEXT_CACHE_TTL_MS) {
+      return cached.text;
+    }
     try {
-      const context = await apiClient.getExerciseContextWindow(residentId, { maxSamples: 50, stepWindow: 50 });
+      const request = apiClient.getExerciseContextWindow(residentId, { maxSamples: 50, stepWindow: 50 });
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('context timeout')), timeoutMs);
+      });
+      const context = await Promise.race([request, timeout]);
       const text = (context.promptText || '').trim();
       if (!text) return '';
-      if (text.length <= 650) return text;
-      return `${text.slice(0, 649).trim()}…`;
+      const clipped = text.length <= 650 ? text : `${text.slice(0, 649).trim()}…`;
+      contextCacheRef.current = { text: clipped, ts: Date.now() };
+      return clipped;
     } catch (error) {
       appendLog('sys', `context unavailable: ${error instanceof Error ? error.message : 'unknown error'}`);
+      const fallback = contextCacheRef.current;
+      return fallback.text || '';
+    }
+  };
+
+  const fetchQnaContextBlock = async (question: string, options?: { timeoutMs?: number }): Promise<string> => {
+    const trimmed = question.trim();
+    if (!trimmed) return '';
+    const timeoutMs = Math.max(120, options?.timeoutMs ?? QNA_FETCH_TIMEOUT_MS);
+    try {
+      const request = apiClient.getExerciseQnaContext(residentId, trimmed, { maxSamples: 50 });
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('qna context timeout')), timeoutMs);
+      });
+      const context = await Promise.race([request, timeout]);
+      const facts = (context.groundingText || '').trim();
+      if (!facts) return '';
+      const focus = context.recommendedFocus.length ? ` Suggested focus: ${context.recommendedFocus.join(' ')}` : '';
+      const envelope = `${facts}${focus} Rows used: ${context.rowsUsed}.`;
+      const clipped = envelope.length <= 780 ? envelope : `${envelope.slice(0, 779).trim()}…`;
+      appendLog('sys', `qna context intent=${context.intent} rows=${context.rowsUsed} stale=${context.staleDataFlag}`);
+      return clipped;
+    } catch (error) {
+      appendLog('sys', `qna context unavailable: ${error instanceof Error ? error.message : 'unknown error'}`);
       return '';
     }
   };
 
-  const pushRealtimeContextUpdate = async () => {
+  const signalStartListening = () => {
+    if (listeningSignaledRef.current) return;
+    listeningSignaledRef.current = true;
+    sendLiveAvatarEvent({ type: 'agent.start_listening', event_id: makeEventId() });
+    void fetchContextPrompt({ preferCache: false, timeoutMs: 220 });
+  };
+
+  const signalStopListening = () => {
+    if (!listeningSignaledRef.current) return;
+    listeningSignaledRef.current = false;
+    sendLiveAvatarEvent({ type: 'agent.stop_listening', event_id: makeEventId() });
+  };
+
+  const pushRealtimeContextUpdate = async (question?: string) => {
     const now = Date.now();
     if (now - lastContextFetchAtRef.current < 1000) return;
     lastContextFetchAtRef.current = now;
-    const contextPrompt = await fetchContextPrompt();
+    const qnaContext = question ? await fetchQnaContextBlock(question, { timeoutMs: 260 }) : '';
+    const contextPrompt = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 240 });
     if (!contextPrompt) return;
     sendElevenEvent({ type: 'contextual_update', text: contextPrompt });
   };
@@ -305,7 +368,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
         const transcript = extractEventText(msg, ['user_transcript', 'transcript', 'user_text']);
         if (transcript && type.includes('transcript')) {
           setLastUserText(transcript);
-          void pushRealtimeContextUpdate();
+          void pushRealtimeContextUpdate(transcript);
         }
         const agentText = extractEventText(msg, ['agent_response', 'response', 'text']);
         if (agentText && (type.includes('agent') || type.includes('response'))) {
@@ -317,37 +380,78 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
 
   const startMicStreaming = async () => {
     if (isTalking) return;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
+      },
+    });
     micStreamRef.current = stream;
     const ctx = new AudioContext();
     micCtxRef.current = ctx;
     const source = ctx.createMediaStreamSource(stream);
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     micProcessorRef.current = processor;
+    speechAttackFramesRef.current = 0;
+    speechReleaseFramesRef.current = 0;
+    speechActiveRef.current = false;
+    noiseFloorRef.current = 0.01;
+    vadHighFramesRef.current = 0;
+    vadLowFramesRef.current = 0;
 
     processor.onaudioprocess = (event) => {
       const input = event.inputBuffer.getChannelData(0);
       const rms = computeRms(input);
-      if (rms > 0.02) {
-        vadHighFramesRef.current += 1;
-        vadLowFramesRef.current = 0;
-      } else if (rms < 0.01) {
-        vadLowFramesRef.current += 1;
+      const peak = computePeak(input);
+      const noiseFloor = noiseFloorRef.current;
+      const updatedFloor = speechActiveRef.current ? noiseFloor : (noiseFloor * 0.97) + (Math.min(0.06, rms) * 0.03);
+      noiseFloorRef.current = Math.max(0.004, Math.min(0.03, updatedFloor));
+      const dynamicThreshold = Math.max(0.016, noiseFloorRef.current * 2.8);
+      const hasDirectVoice = peak >= 0.05 && rms >= dynamicThreshold;
+      const isSpeechStrong = hasDirectVoice && rms >= dynamicThreshold * 1.05;
+      const isSpeechWeak = hasDirectVoice && rms >= dynamicThreshold * 0.85;
+      const shouldUseHandsfree = captureMode === 'handsfree';
+      let shouldSendChunk = false;
+
+      if (shouldUseHandsfree) {
+        if (isSpeechStrong) {
+          speechAttackFramesRef.current += 1;
+          speechReleaseFramesRef.current = 0;
+        } else if (speechActiveRef.current && isSpeechWeak) {
+          speechReleaseFramesRef.current = 0;
+        } else {
+          speechAttackFramesRef.current = 0;
+          speechReleaseFramesRef.current += 1;
+        }
+
+        if (!speechActiveRef.current && speechAttackFramesRef.current >= 3) {
+          speechActiveRef.current = true;
+          if (avatarSpeakingRef.current) void handleBargeIn();
+          signalStartListening();
+        }
+        if (speechActiveRef.current && speechReleaseFramesRef.current >= 12) {
+          speechActiveRef.current = false;
+          signalStopListening();
+        }
+        shouldSendChunk = speechActiveRef.current && (isSpeechStrong || isSpeechWeak);
+      } else {
+        if (pttPressedRef.current) {
+          if (!speechActiveRef.current) {
+            speechActiveRef.current = true;
+            if (avatarSpeakingRef.current) void handleBargeIn();
+            signalStartListening();
+          }
+          shouldSendChunk = isSpeechWeak;
+        } else if (speechActiveRef.current) {
+          speechActiveRef.current = false;
+          signalStopListening();
+        }
       }
 
-      if (vadHighFramesRef.current >= 2) {
-        if (!isTalking) setIsTalking(true);
-        if (avatarSpeakingRef.current) {
-          void handleBargeIn();
-        }
-        sendLiveAvatarEvent({ type: 'agent.start_listening', event_id: makeEventId() });
-        vadHighFramesRef.current = 0;
-      }
-      if (vadLowFramesRef.current >= 8) {
-        setIsTalking(false);
-        sendLiveAvatarEvent({ type: 'agent.stop_listening', event_id: makeEventId() });
-        vadLowFramesRef.current = 0;
-      }
+      if (!shouldSendChunk) return;
 
       const downsampled = resampleLinear(input, ctx.sampleRate, ELEVEN_USER_INPUT_RATE);
       const pcm16 = float32ToPcm16(downsampled);
@@ -362,6 +466,11 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
 
   const stopMicStreaming = async () => {
     setIsTalking(false);
+    setPttPressed(false);
+    pttPressedRef.current = false;
+    speechActiveRef.current = false;
+    speechAttackFramesRef.current = 0;
+    speechReleaseFramesRef.current = 0;
     if (micProcessorRef.current) {
       micProcessorRef.current.disconnect();
       micProcessorRef.current.onaudioprocess = null;
@@ -375,8 +484,20 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
       micStreamRef.current.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;
     }
-    sendLiveAvatarEvent({ type: 'agent.stop_listening', event_id: makeEventId() });
+    signalStopListening();
     appendLog('sys', 'Microphone streaming stopped');
+  };
+
+  const beginPtt = async () => {
+    if (status !== 'connected') return;
+    if (!isTalking) await startMicStreaming();
+    pttPressedRef.current = true;
+    setPttPressed(true);
+  };
+
+  const endPtt = () => {
+    pttPressedRef.current = false;
+    setPttPressed(false);
   };
 
   const startSession = async () => {
@@ -398,6 +519,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
       await connectLiveKit(session.livekit_url, session.livekit_client_token);
       await connectLiveAvatarWs(session.ws_url);
       await connectElevenWs();
+      void fetchContextPrompt({ preferCache: false, timeoutMs: 240 });
 
       setStatus('connected');
       appendLog('sys', 'Session fully connected (LiveKit + LiveAvatar WS + Eleven WS)');
@@ -443,8 +565,11 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     const text = inputText.trim();
     if (!text) return;
     setLastUserText(text);
-    const contextPrompt = await fetchContextPrompt();
-    const contextualText = contextPrompt ? `${contextPrompt}\n\nUser question: ${text}` : text;
+    const qnaContext = await fetchQnaContextBlock(text, { timeoutMs: 280 });
+    const contextPrompt = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 240 });
+    const contextualText = contextPrompt
+      ? `Use only the following exercise context facts when relevant. If data is missing, say so briefly.\nContext: ${contextPrompt}\n\nUser question: ${text}`
+      : text;
     sendElevenEvent({ type: 'user_message', text: contextualText });
     setInputText('');
   };
@@ -465,6 +590,29 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
             Session: <span className="font-bold">{status}</span> | LiveAvatar state: <span className="font-bold">{liveAvatarState}</span> | Mic:{' '}
             <span className="font-bold">{isTalking ? 'active' : 'idle'}</span>
           </p>
+          <div className="flex items-center gap-2 text-xs text-slate-200">
+            <span className="text-slate-300">Capture mode:</span>
+            <button
+              type="button"
+              onClick={() => {
+                setCaptureMode('ptt');
+                void stopMicStreaming();
+              }}
+              className={`rounded-md px-2 py-1 font-bold ${captureMode === 'ptt' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-200'}`}
+            >
+              Push-to-talk (default)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCaptureMode('handsfree');
+                endPtt();
+              }}
+              className={`rounded-md px-2 py-1 font-bold ${captureMode === 'handsfree' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-200'}`}
+            >
+              Hands-free
+            </button>
+          </div>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -482,22 +630,39 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
             >
               Stop
             </button>
-            <button
-              type="button"
-              onClick={() => void startMicStreaming()}
-              disabled={status !== 'connected' || isTalking}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-            >
-              Start Talking
-            </button>
-            <button
-              type="button"
-              onClick={() => void stopMicStreaming()}
-              disabled={!isTalking}
-              className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-            >
-              Stop Talking
-            </button>
+            {captureMode === 'handsfree' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void startMicStreaming()}
+                  disabled={status !== 'connected' || isTalking}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  Start Hands-free
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void stopMicStreaming()}
+                  disabled={!isTalking}
+                  className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  Stop Hands-free
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onMouseDown={() => void beginPtt()}
+                onMouseUp={endPtt}
+                onMouseLeave={endPtt}
+                onTouchStart={() => void beginPtt()}
+                onTouchEnd={endPtt}
+                disabled={status !== 'connected'}
+                className={`rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-50 ${pttPressed ? 'bg-rose-700' : 'bg-indigo-600'}`}
+              >
+                {pttPressed ? 'Listening… release to stop' : 'Hold to Talk'}
+              </button>
+            )}
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-300">
             <input type="checkbox" checked={debugConversion} onChange={(event) => setDebugConversion(event.target.checked)} />
@@ -636,5 +801,14 @@ function computeRms(input: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < input.length; i += 1) sum += input[i] * input[i];
   return Math.sqrt(sum / Math.max(input.length, 1));
+}
+
+function computePeak(input: Float32Array): number {
+  let peak = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    const abs = Math.abs(input[i]);
+    if (abs > peak) peak = abs;
+  }
+  return peak;
 }
 
