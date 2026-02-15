@@ -109,6 +109,11 @@ async def eleven_signed_url(request: Request, agent_id: Optional[str] = Query(de
     return {'signed_url': signed_url}
 
 
+@router.get('/api/elevenlabs/signed-url')
+async def elevenlabs_signed_url_alias(request: Request, agent_id: Optional[str] = Query(default=None)):
+    return await eleven_signed_url(request=request, agent_id=agent_id)
+
+
 @router.post('/api/eleven/session')
 async def create_eleven_session(request: Request, payload: ElevenSessionPayload):
     if not _allow_request(_client_key(request)):

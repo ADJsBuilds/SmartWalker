@@ -190,6 +190,18 @@ export interface ElevenSessionResponse {
   signed_url: string;
 }
 
+export interface LiveAvatarLiteBridgeSessionResponse {
+  ok: boolean;
+  session_id?: string;
+  session_token?: string;
+  livekit_url?: string;
+  livekit_client_token?: string;
+  livekit_agent_token?: string;
+  ws_url?: string;
+  max_session_duration?: number;
+  error?: string;
+}
+
 export interface ApiErrorShape {
   status: number;
   message: string;

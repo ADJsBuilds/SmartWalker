@@ -32,7 +32,7 @@ Config sources:
 - `VITE_API_BASE_URL` (build-time default)
 - Settings modal override (runtime, stored in `localStorage`)
 
-Default fallback: `http://localhost:8000`
+Default fallback: `https://smartwalker-back.onrender.com`
 
 ## Routes
 
@@ -41,6 +41,20 @@ Default fallback: `http://localhost:8000`
 - `/user` production user-facing LiveAvatar screen (full-screen avatar + orange press-to-talk button)
 - `/liveavatar-test` LiveAvatar bootstrap + LiveKit connection test page
 - `/voice-agent-playground` ElevenLabs Agents websocket playground (text-first + contextual updates)
+
+## ElevenLabs + LiveAvatar LITE Bridge
+
+The main page (`/`) includes a bridge panel that:
+1) streams microphone audio to ElevenLabs agent websocket,
+2) plays agent audio locally,
+3) converts/forwards agent audio to LiveAvatar LITE websocket via `agent.speak`,
+4) renders avatar video from LiveKit.
+
+Required backend env vars for this bridge:
+- `ELEVENLABS_API_KEY`
+- `ELEVENLABS_AGENT_ID`
+- `LIVEAVATAR_API_KEY`
+- `LIVEAVATAR_AVATAR_ID`
 
 ## LiveAvatar Test Page
 

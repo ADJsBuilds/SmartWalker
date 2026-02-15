@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication } from 'livekit-client';
 
 import type { ApiClient } from '../lib/apiClient';
-import { getSpeechRecognitionCtor, type SpeechRecognitionLike } from '../lib/speech';
 
 type SessionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -17,33 +17,46 @@ interface EventLog {
   text: string;
 }
 
+const LIVEAVATAR_TARGET_RATE = 24000;
+const ELEVEN_USER_INPUT_RATE = 16000;
+const LIVEAVATAR_CHUNK_SECONDS = 1;
+const LIVEAVATAR_CHUNK_BYTES = LIVEAVATAR_TARGET_RATE * 2 * LIVEAVATAR_CHUNK_SECONDS;
+
 export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsConversationPanelProps) {
   const [status, setStatus] = useState<SessionStatus>('idle');
-  const [isListening, setIsListening] = useState(false);
+  const [isTalking, setIsTalking] = useState(false);
+  const [debugConversion, setDebugConversion] = useState(false);
   const [inputText, setInputText] = useState('');
   const [lastUserText, setLastUserText] = useState('');
   const [lastAgentText, setLastAgentText] = useState('');
+  const [liveAvatarState, setLiveAvatarState] = useState('idle');
   const [logs, setLogs] = useState<EventLog[]>([]);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const recRef = useRef<SpeechRecognitionLike | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
+  const videoHostRef = useRef<HTMLDivElement | null>(null);
+  const livekitRoomRef = useRef<Room | null>(null);
+  const liveAvatarWsRef = useRef<WebSocket | null>(null);
+  const elevenWsRef = useRef<WebSocket | null>(null);
+  const keepAliveTimerRef = useRef<number | null>(null);
+  const speakEndTimerRef = useRef<number | null>(null);
+  const micCtxRef = useRef<AudioContext | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+  const playbackNextStartRef = useRef(0);
   const playbackChainRef = useRef<Promise<void>>(Promise.resolve());
-  const nextStartTimeRef = useRef(0);
-  const speechSupported = useMemo(() => Boolean(getSpeechRecognitionCtor()), []);
+  const avatarReadyRef = useRef(false);
+  const avatarSpeakingRef = useRef(false);
+  const currentTurnIdRef = useRef<string | null>(null);
+  const liveAvatarPcmBufferRef = useRef<Uint8Array>(new Uint8Array(0));
+  const elevenOutputRateRef = useRef<number>(16000);
+  const vadHighFramesRef = useRef(0);
+  const vadLowFramesRef = useRef(0);
 
   useEffect(() => {
     return () => {
-      recRef.current?.stop();
-      recRef.current = null;
-      const ws = wsRef.current;
-      if (ws && ws.readyState <= WebSocket.OPEN) ws.close(1000, 'component cleanup');
-      wsRef.current = null;
-      if (audioCtxRef.current) {
-        void audioCtxRef.current.close();
-        audioCtxRef.current = null;
-      }
+      void stopSession();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const appendLog = (direction: EventLog['direction'], text: string) => {
@@ -55,279 +68,495 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
         text,
       },
       ...prev,
-    ].slice(0, 80));
+    ].slice(0, 120));
   };
 
-  const sendEvent = (payload: Record<string, unknown>) => {
-    const ws = wsRef.current;
+  const sendLiveAvatarEvent = (payload: Record<string, unknown>) => {
+    const ws = liveAvatarWsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
-    appendLog('out', JSON.stringify(payload));
+    appendLog('out', `liveavatar: ${JSON.stringify(payload)}`);
   };
 
-  const getAudioContext = async (): Promise<AudioContext> => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new AudioContext();
-      nextStartTimeRef.current = 0;
-    }
-    if (audioCtxRef.current.state === 'suspended') {
-      await audioCtxRef.current.resume();
-    }
-    return audioCtxRef.current;
+  const sendElevenEvent = (payload: Record<string, unknown>) => {
+    const ws = elevenWsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(payload));
+    appendLog('out', `eleven: ${JSON.stringify(payload)}`);
   };
 
-  const schedulePlayback = async (audioBuffer: AudioBuffer) => {
-    const ctx = await getAudioContext();
+  const getPlaybackContext = async (): Promise<AudioContext> => {
+    if (!playbackCtxRef.current) {
+      playbackCtxRef.current = new AudioContext();
+      playbackNextStartRef.current = 0;
+    }
+    if (playbackCtxRef.current.state === 'suspended') {
+      await playbackCtxRef.current.resume();
+    }
+    return playbackCtxRef.current;
+  };
+
+  const clearPlaybackQueue = async () => {
+    playbackChainRef.current = Promise.resolve();
+    playbackNextStartRef.current = 0;
+    if (playbackCtxRef.current) {
+      await playbackCtxRef.current.close();
+      playbackCtxRef.current = null;
+    }
+  };
+
+  const scheduleLocalPlayback = async (pcm16le: Uint8Array, sampleRate: number) => {
+    const ctx = await getPlaybackContext();
+    const frameCount = Math.floor(pcm16le.byteLength / 2);
+    const audioBuffer = ctx.createBuffer(1, frameCount, sampleRate);
+    const channel = audioBuffer.getChannelData(0);
+    const view = new DataView(pcm16le.buffer, pcm16le.byteOffset, pcm16le.byteLength);
+    for (let i = 0; i < frameCount; i += 1) {
+      channel[i] = view.getInt16(i * 2, true) / 32768;
+    }
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(ctx.destination);
-    const startAt = Math.max(ctx.currentTime, nextStartTimeRef.current);
+    const startAt = Math.max(ctx.currentTime, playbackNextStartRef.current);
     source.start(startAt);
-    nextStartTimeRef.current = startAt + audioBuffer.duration;
+    playbackNextStartRef.current = startAt + audioBuffer.duration;
   };
 
-  const playChunk = async (chunk: AudioChunk) => {
-    const ctx = await getAudioContext();
-    const bytes = decodeBase64ToUint8Array(chunk.base64);
-    if (!bytes.byteLength) return;
-
-    if ((chunk.encoding || '').toLowerCase().includes('pcm')) {
-      const sampleRate = Number(chunk.sampleRate || 16000);
-      const pcmBuffer = pcm16ToAudioBuffer(ctx, bytes, sampleRate);
-      await schedulePlayback(pcmBuffer);
-      return;
+  const flushLiveAvatarAudio = () => {
+    if (!avatarReadyRef.current) return;
+    const turnId = currentTurnIdRef.current;
+    if (!turnId) return;
+    let buffer = liveAvatarPcmBufferRef.current;
+    while (buffer.byteLength >= LIVEAVATAR_CHUNK_BYTES) {
+      const chunk = buffer.slice(0, LIVEAVATAR_CHUNK_BYTES);
+      buffer = buffer.slice(LIVEAVATAR_CHUNK_BYTES);
+      sendLiveAvatarEvent({ type: 'agent.speak', audio: uint8ToBase64(chunk), event_id: turnId });
+      if (debugConversion) appendLog('sys', `agent.speak chunk bytes=${chunk.byteLength} b64=${uint8ToBase64(chunk).length}`);
     }
+    liveAvatarPcmBufferRef.current = buffer;
+  };
 
-    try {
-      const copy = new Uint8Array(bytes.byteLength);
-      copy.set(bytes);
-      const decoded = await ctx.decodeAudioData(copy.buffer);
-      await schedulePlayback(decoded);
-    } catch {
-      // Fallback to raw PCM if provider omits encoding metadata.
-      const fallback = pcm16ToAudioBuffer(ctx, bytes, Number(chunk.sampleRate || 16000));
-      await schedulePlayback(fallback);
+  const endAgentTurn = () => {
+    const turnId = currentTurnIdRef.current;
+    if (!turnId) return;
+    if (liveAvatarPcmBufferRef.current.byteLength > 0) {
+      const chunk = liveAvatarPcmBufferRef.current;
+      liveAvatarPcmBufferRef.current = new Uint8Array(0);
+      sendLiveAvatarEvent({ type: 'agent.speak', audio: uint8ToBase64(chunk), event_id: turnId });
     }
+    sendLiveAvatarEvent({ type: 'agent.speak_end', event_id: turnId });
+    avatarSpeakingRef.current = false;
+    currentTurnIdRef.current = null;
   };
 
-  const queueAudioChunk = (chunk: AudioChunk) => {
-    playbackChainRef.current = playbackChainRef.current
-      .then(() => playChunk(chunk))
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Audio playback failed';
-        appendLog('sys', message);
-      });
+  const resetSpeakEndTimer = () => {
+    if (speakEndTimerRef.current) {
+      window.clearTimeout(speakEndTimerRef.current);
+    }
+    speakEndTimerRef.current = window.setTimeout(() => {
+      endAgentTurn();
+      speakEndTimerRef.current = null;
+    }, 500);
   };
 
-  const startSession = async () => {
-    if (status === 'connecting' || status === 'connected') return;
-    setStatus('connecting');
-    setLastUserText('');
-    setLastAgentText('');
-    try {
-      const session = await apiClient.createElevenSession({});
-      const ws = new WebSocket(session.signed_url);
-      wsRef.current = ws;
+  const handleBargeIn = async () => {
+    if (!avatarSpeakingRef.current) return;
+    sendLiveAvatarEvent({ type: 'agent.interrupt' });
+    if (speakEndTimerRef.current) {
+      window.clearTimeout(speakEndTimerRef.current);
+      speakEndTimerRef.current = null;
+    }
+    currentTurnIdRef.current = null;
+    liveAvatarPcmBufferRef.current = new Uint8Array(0);
+    avatarSpeakingRef.current = false;
+    await clearPlaybackQueue();
+    appendLog('sys', 'Barge-in: interrupted avatar and cleared playback buffers');
+  };
 
+  const connectLiveKit = async (livekitUrl: string, livekitClientToken: string) => {
+    if (!videoHostRef.current) return;
+    videoHostRef.current.innerHTML = '';
+    const room = new Room();
+    livekitRoomRef.current = room;
+    room.on(
+      RoomEvent.TrackSubscribed,
+      (track: RemoteTrack, _publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        appendLog('sys', `LiveKit track subscribed: ${track.kind} (${participant.identity})`);
+        const element = track.attach();
+        if (track.kind === Track.Kind.Video) {
+          element.className = 'h-full w-full rounded-xl object-cover bg-black';
+        } else {
+          element.className = 'hidden';
+          const audioEl = element as HTMLAudioElement;
+          audioEl.autoplay = true;
+          audioEl.muted = true;
+        }
+        videoHostRef.current?.appendChild(element);
+      },
+    );
+    room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+      track.detach().forEach((el: HTMLMediaElement) => el.remove());
+    });
+    await room.connect(livekitUrl, livekitClientToken);
+    appendLog('sys', 'LiveKit connected');
+  };
+
+  const connectLiveAvatarWs = async (wsUrl: string) => {
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      liveAvatarWsRef.current = ws;
       ws.onopen = () => {
-        setStatus('connected');
-        appendLog('sys', `Connected (${session.session_id})`);
-        void getAudioContext();
+        appendLog('sys', 'LiveAvatar websocket connected');
+        setLiveAvatarState('ws_connected');
+        keepAliveTimerRef.current = window.setInterval(() => {
+          sendLiveAvatarEvent({ type: 'session.keep_alive', event_id: makeEventId() });
+        }, 45000);
+        resolve();
       };
-
-      ws.onclose = (event) => {
-        setStatus('disconnected');
-        appendLog('sys', `Closed: ${event.code} ${event.reason || ''}`.trim());
+      ws.onerror = () => reject(new Error('LiveAvatar websocket failed'));
+      ws.onclose = () => {
+        avatarReadyRef.current = false;
+        setLiveAvatarState('closed');
       };
-
-      ws.onerror = () => {
-        setStatus('error');
-        appendLog('sys', 'WebSocket error');
-      };
-
       ws.onmessage = (event) => {
         let payload: unknown;
         try {
           payload = JSON.parse(String(event.data));
         } catch {
-          appendLog('in', `RAW: ${String(event.data)}`);
           return;
         }
         if (!payload || typeof payload !== 'object') return;
-        const message = payload as Record<string, unknown>;
-        const type = String(message.type || '');
-        appendLog('in', JSON.stringify(message));
-
-        const audioChunk = extractAudioChunk(message);
-        if (audioChunk) {
-          queueAudioChunk(audioChunk);
+        const msg = payload as Record<string, unknown>;
+        const type = String(msg.type || '');
+        appendLog('in', `liveavatar: ${JSON.stringify(msg)}`);
+        if (type === 'session.state_updated') {
+          const sessionState = String(msg.session_state || (msg.session as Record<string, unknown> | undefined)?.state || '').toLowerCase();
+          setLiveAvatarState(sessionState || 'updated');
+          if (sessionState === 'connected') {
+            avatarReadyRef.current = true;
+            appendLog('sys', 'LiveAvatar session connected and ready for agent.speak');
+          }
         }
+      };
+    });
+  };
 
-        if (type === 'ping') {
-          const pingEvent = (message.ping_event as Record<string, unknown> | undefined) || {};
-          const eventId = String(pingEvent.event_id || message.event_id || '');
-          if (eventId) sendEvent({ type: 'pong', event_id: eventId });
+  const connectElevenWs = async () => {
+    const session = await apiClient.createElevenSession({});
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(session.signed_url);
+      elevenWsRef.current = ws;
+      ws.onopen = () => {
+        appendLog('sys', `ElevenLabs websocket connected (${session.session_id})`);
+        sendElevenEvent({
+          type: 'conversation_initiation_client_data',
+          conversation_config_override: {},
+        });
+        resolve();
+      };
+      ws.onerror = () => reject(new Error('ElevenLabs websocket failed'));
+      ws.onclose = () => appendLog('sys', 'ElevenLabs websocket closed');
+      ws.onmessage = (event) => {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(String(event.data));
+        } catch {
+          appendLog('in', `eleven raw: ${String(event.data)}`);
           return;
         }
+        if (!payload || typeof payload !== 'object') return;
+        const msg = payload as Record<string, unknown>;
+        const type = String(msg.type || '');
+        appendLog('in', `eleven: ${JSON.stringify(msg)}`);
 
-        if (type === 'client_tool_call') {
-          const toolCall = (message.client_tool_call as Record<string, unknown> | undefined) || {};
-          const toolCallId = String(toolCall.tool_call_id || '');
-          if (toolCallId) {
-            sendEvent({
-              type: 'client_tool_result',
-              tool_call_id: toolCallId,
-              result: 'NOT IMPLEMENTED',
-              is_error: true,
-            });
+        if (type === 'ping') {
+          const pingEvent = (msg.ping_event as Record<string, unknown> | undefined) || {};
+          const eventId = Number(pingEvent.event_id ?? msg.event_id);
+          if (Number.isFinite(eventId)) {
+            sendElevenEvent({ type: 'pong', event_id: eventId });
           }
           return;
         }
 
-        const transcriptText = extractEventText(message, ['user_transcript', 'transcript', 'user_text']);
-        if (transcriptText && type.includes('transcript')) {
-          setLastUserText(transcriptText);
+        if (type === 'conversation_initiation_metadata') {
+          const metadataEvent = (msg.conversation_initiation_metadata_event as Record<string, unknown> | undefined) || {};
+          const audioFormat = String(metadataEvent.agent_output_audio_format || '');
+          const parsedRate = parseSampleRate(audioFormat);
+          if (parsedRate) {
+            elevenOutputRateRef.current = parsedRate;
+            appendLog('sys', `Eleven output format=${audioFormat}`);
+          }
           return;
         }
 
-        const agentText = extractEventText(message, ['agent_response', 'response', 'text']);
+        if (type === 'interruption') {
+          endAgentTurn();
+          return;
+        }
+
+        if (type === 'audio') {
+          const audioEvent = (msg.audio_event as Record<string, unknown> | undefined) || {};
+          const base64 = String(audioEvent.audio_base_64 || '');
+          if (!base64) return;
+          const rawPcm = base64ToUint8(base64);
+
+          playbackChainRef.current = playbackChainRef.current.then(() => scheduleLocalPlayback(rawPcm, elevenOutputRateRef.current));
+
+          const float32 = pcm16ToFloat32(rawPcm);
+          const resampled = resampleLinear(float32, elevenOutputRateRef.current, LIVEAVATAR_TARGET_RATE);
+          const pcm24k = float32ToPcm16(resampled);
+          liveAvatarPcmBufferRef.current = concatUint8(liveAvatarPcmBufferRef.current, pcm24k);
+
+          if (!currentTurnIdRef.current) currentTurnIdRef.current = makeEventId();
+          avatarSpeakingRef.current = true;
+          flushLiveAvatarAudio();
+          resetSpeakEndTimer();
+
+          if (debugConversion) {
+            appendLog('sys', `audio in=${rawPcm.byteLength}B@${elevenOutputRateRef.current} out=${pcm24k.byteLength}B@24000`);
+          }
+          return;
+        }
+
+        const transcript = extractEventText(msg, ['user_transcript', 'transcript', 'user_text']);
+        if (transcript && type.includes('transcript')) {
+          setLastUserText(transcript);
+        }
+        const agentText = extractEventText(msg, ['agent_response', 'response', 'text']);
         if (agentText && (type.includes('agent') || type.includes('response'))) {
           setLastAgentText(agentText);
         }
       };
+    });
+  };
+
+  const startMicStreaming = async () => {
+    if (isTalking) return;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micStreamRef.current = stream;
+    const ctx = new AudioContext();
+    micCtxRef.current = ctx;
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    micProcessorRef.current = processor;
+
+    processor.onaudioprocess = (event) => {
+      const input = event.inputBuffer.getChannelData(0);
+      const rms = computeRms(input);
+      if (rms > 0.02) {
+        vadHighFramesRef.current += 1;
+        vadLowFramesRef.current = 0;
+      } else if (rms < 0.01) {
+        vadLowFramesRef.current += 1;
+      }
+
+      if (vadHighFramesRef.current >= 2) {
+        if (!isTalking) setIsTalking(true);
+        if (avatarSpeakingRef.current) {
+          void handleBargeIn();
+        }
+        sendLiveAvatarEvent({ type: 'agent.start_listening', event_id: makeEventId() });
+        vadHighFramesRef.current = 0;
+      }
+      if (vadLowFramesRef.current >= 8) {
+        setIsTalking(false);
+        sendLiveAvatarEvent({ type: 'agent.stop_listening', event_id: makeEventId() });
+        vadLowFramesRef.current = 0;
+      }
+
+      const downsampled = resampleLinear(input, ctx.sampleRate, ELEVEN_USER_INPUT_RATE);
+      const pcm16 = float32ToPcm16(downsampled);
+      sendElevenEvent({ user_audio_chunk: uint8ToBase64(pcm16) });
+    };
+
+    source.connect(processor);
+    processor.connect(ctx.destination);
+    setIsTalking(true);
+    appendLog('sys', 'Microphone streaming started');
+  };
+
+  const stopMicStreaming = async () => {
+    setIsTalking(false);
+    if (micProcessorRef.current) {
+      micProcessorRef.current.disconnect();
+      micProcessorRef.current.onaudioprocess = null;
+      micProcessorRef.current = null;
+    }
+    if (micCtxRef.current) {
+      await micCtxRef.current.close();
+      micCtxRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+    sendLiveAvatarEvent({ type: 'agent.stop_listening', event_id: makeEventId() });
+    appendLog('sys', 'Microphone streaming stopped');
+  };
+
+  const startSession = async () => {
+    if (status === 'connecting' || status === 'connected') return;
+    if (!videoHostRef.current) {
+      notify('Video host not ready yet.', 'warn');
+      return;
+    }
+    setStatus('connecting');
+    setLastUserText('');
+    setLastAgentText('');
+    setLiveAvatarState('starting');
+    try {
+      const session = await apiClient.createLiveAvatarSession({});
+      if (!session.ok || !session.livekit_url || !session.livekit_client_token || !session.ws_url) {
+        throw new Error(session.error || 'LiveAvatar session bootstrap failed');
+      }
+
+      await connectLiveKit(session.livekit_url, session.livekit_client_token);
+      await connectLiveAvatarWs(session.ws_url);
+      await connectElevenWs();
+      await getPlaybackContext();
+
+      setStatus('connected');
+      appendLog('sys', 'Session fully connected (LiveKit + LiveAvatar WS + Eleven WS)');
     } catch (error) {
       setStatus('error');
-      notify(error instanceof Error ? error.message : 'Failed to start ElevenLabs session.', 'error');
+      notify(error instanceof Error ? error.message : 'Failed to start bridge session.', 'error');
     }
   };
 
-  const stopSession = () => {
-    recRef.current?.stop();
-    recRef.current = null;
-    const ws = wsRef.current;
-    if (ws && ws.readyState <= WebSocket.OPEN) ws.close(1000, 'manual stop');
-    wsRef.current = null;
-    setIsListening(false);
+  async function stopSession() {
     setStatus('disconnected');
-    appendLog('sys', 'Disconnected');
-    nextStartTimeRef.current = 0;
-    playbackChainRef.current = Promise.resolve();
-  };
+    avatarReadyRef.current = false;
+    if (keepAliveTimerRef.current) {
+      window.clearInterval(keepAliveTimerRef.current);
+      keepAliveTimerRef.current = null;
+    }
+    if (speakEndTimerRef.current) {
+      window.clearTimeout(speakEndTimerRef.current);
+      speakEndTimerRef.current = null;
+    }
+    await stopMicStreaming();
+    endAgentTurn();
+    await clearPlaybackQueue();
+
+    if (elevenWsRef.current && elevenWsRef.current.readyState <= WebSocket.OPEN) elevenWsRef.current.close(1000, 'manual stop');
+    elevenWsRef.current = null;
+    if (liveAvatarWsRef.current && liveAvatarWsRef.current.readyState <= WebSocket.OPEN) liveAvatarWsRef.current.close(1000, 'manual stop');
+    liveAvatarWsRef.current = null;
+
+    if (livekitRoomRef.current) {
+      try {
+        livekitRoomRef.current.removeAllListeners();
+        await livekitRoomRef.current.disconnect();
+      } catch {
+        // best effort
+      }
+      livekitRoomRef.current = null;
+    }
+    setLiveAvatarState('idle');
+    appendLog('sys', 'Disconnected all bridge resources');
+  }
 
   const sendText = () => {
     const text = inputText.trim();
     if (!text) return;
     setLastUserText(text);
-    sendEvent({ type: 'user_message', text });
+    sendElevenEvent({ type: 'user_message', text });
     setInputText('');
-  };
-
-  const talk = () => {
-    if (status !== 'connected') return;
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor) {
-      notify('Speech recognition is not supported in this browser.', 'warn');
-      return;
-    }
-
-    recRef.current?.stop();
-    const rec = new Ctor();
-    recRef.current = rec;
-    rec.lang = 'en-US';
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.onerror = () => setIsListening(false);
-    rec.onend = () => setIsListening(false);
-    rec.onresult = (event) => {
-      const transcript = event.results[0]?.[0]?.transcript?.trim() || '';
-      setIsListening(false);
-      if (!transcript) return;
-      setLastUserText(transcript);
-      sendEvent({ type: 'user_message', text: transcript });
-    };
-    setIsListening(true);
-    rec.start();
   };
 
   return (
     <div className="rounded-2xl bg-slate-900 p-4 sm:p-6">
-      <h3 className="text-2xl font-black text-white">ElevenLabs Voice Agent</h3>
-      <p className="mt-1 text-sm text-slate-300">Direct conversation using backend signed WebSocket session.</p>
+      <h3 className="text-2xl font-black text-white">ElevenLabs + LiveAvatar LITE Bridge</h3>
+      <p className="mt-1 text-sm text-slate-300">Mic -&gt; ElevenLabs -&gt; local audio + LiveAvatar agent.speak -&gt; LiveKit avatar video.</p>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={startSession}
-          disabled={status === 'connecting' || status === 'connected'}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-        >
-          Start Session
-        </button>
-        <button
-          type="button"
-          onClick={stopSession}
-          disabled={status !== 'connected' && status !== 'connecting'}
-          className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-        >
-          Stop
-        </button>
-        <button
-          type="button"
-          onClick={talk}
-          disabled={status !== 'connected' || !speechSupported}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-        >
-          {isListening ? 'Listening...' : 'Tap To Talk'}
-        </button>
-      </div>
-
-      <p className="mt-3 text-xs text-slate-300">
-        Status: <span className="font-bold">{status}</span>
-        {!speechSupported ? ' | Mic unavailable in this browser (text still works).' : ''}
-      </p>
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200">
-          <p className="text-xs text-slate-400">You</p>
-          <p>{lastUserText || '...'}</p>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="space-y-3">
+          <div className="rounded-xl border border-slate-700 bg-black p-2">
+            <div ref={videoHostRef} className="flex h-56 w-full items-center justify-center rounded-lg bg-slate-950 text-xs text-slate-400">
+              Waiting for avatar video track...
+            </div>
+          </div>
+          <p className="text-xs text-slate-300">
+            Session: <span className="font-bold">{status}</span> | LiveAvatar state: <span className="font-bold">{liveAvatarState}</span> | Mic:{' '}
+            <span className="font-bold">{isTalking ? 'active' : 'idle'}</span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void startSession()}
+              disabled={status === 'connecting' || status === 'connected'}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              Start Session
+            </button>
+            <button
+              type="button"
+              onClick={() => void stopSession()}
+              disabled={status === 'idle' || status === 'disconnected'}
+              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              Stop
+            </button>
+            <button
+              type="button"
+              onClick={() => void startMicStreaming()}
+              disabled={status !== 'connected' || isTalking}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              Start Talking
+            </button>
+            <button
+              type="button"
+              onClick={() => void stopMicStreaming()}
+              disabled={!isTalking}
+              className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              Stop Talking
+            </button>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" checked={debugConversion} onChange={(event) => setDebugConversion(event.target.checked)} />
+            Debug audio conversion logs
+          </label>
         </div>
-        <div className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200">
-          <p className="text-xs text-slate-400">Agent</p>
-          <p>{lastAgentText || '...'}</p>
+
+        <div className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200">
+              <p className="text-xs text-slate-400">You</p>
+              <p>{lastUserText || '...'}</p>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200">
+              <p className="text-xs text-slate-400">Agent</p>
+              <p>{lastAgentText || '...'}</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={inputText}
+              onChange={(event) => setInputText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') sendText();
+              }}
+              placeholder="Optional text input to prompt agent..."
+              className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+            />
+            <button
+              type="button"
+              onClick={sendText}
+              disabled={status !== 'connected' || !inputText.trim()}
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              Send
+            </button>
+          </div>
+          <div className="max-h-60 overflow-auto rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs text-slate-300">
+            {logs.length ? logs.map((log) => <p key={log.id}>[{log.ts}] {log.direction.toUpperCase()}: {log.text}</p>) : <p>No events yet.</p>}
+          </div>
         </div>
-      </div>
-
-      <div className="mt-3 flex gap-2">
-        <input
-          value={inputText}
-          onChange={(event) => setInputText(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') sendText();
-          }}
-          placeholder="Type a message to the agent..."
-          className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-        />
-        <button
-          type="button"
-          onClick={sendText}
-          disabled={status !== 'connected' || !inputText.trim()}
-          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-        >
-          Send
-        </button>
-      </div>
-
-      <div className="mt-3 max-h-44 overflow-auto rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs text-slate-300">
-        {logs.length ? logs.map((log) => <p key={log.id}>[{log.ts}] {log.direction.toUpperCase()}: {log.text}</p>) : <p>No events yet.</p>}
       </div>
     </div>
   );
-}
-
-interface AudioChunk {
-  base64: string;
-  sampleRate?: number;
-  encoding?: string;
 }
 
 function extractEventText(payload: Record<string, unknown>, candidateKeys: string[]): string {
@@ -345,81 +574,82 @@ function extractEventText(payload: Record<string, unknown>, candidateKeys: strin
   return '';
 }
 
-function extractAudioChunk(payload: Record<string, unknown>): AudioChunk | null {
-  const topLevel = pickAudioBase64(payload);
-  if (topLevel) {
-    return {
-      base64: topLevel,
-      sampleRate: pickNumber(payload, ['sample_rate', 'sampleRate', 'audio_sample_rate', 'rate']),
-      encoding: pickString(payload, ['encoding', 'audio_encoding', 'format', 'audio_format']),
-    };
-  }
-
-  for (const value of Object.values(payload)) {
-    if (!value || typeof value !== 'object') continue;
-    const nested = value as Record<string, unknown>;
-    const nestedBase64 = pickAudioBase64(nested);
-    if (!nestedBase64) continue;
-    return {
-      base64: nestedBase64,
-      sampleRate: pickNumber(nested, ['sample_rate', 'sampleRate', 'audio_sample_rate', 'rate']),
-      encoding: pickString(nested, ['encoding', 'audio_encoding', 'format', 'audio_format']),
-    };
-  }
-  return null;
+function makeEventId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function pickAudioBase64(obj: Record<string, unknown>): string | null {
-  const keys = ['audio_base_64', 'audio', 'audio_chunk', 'chunk', 'base64', 'data'];
-  for (const key of keys) {
-    const value = obj[key];
-    if (typeof value !== 'string') continue;
-    const trimmed = value.trim();
-    if (looksLikeBase64(trimmed)) return trimmed;
-  }
-  return null;
+function parseSampleRate(format: string): number | null {
+  const match = format.match(/pcm_(\d+)/i);
+  if (!match) return null;
+  const rate = Number(match[1]);
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
 }
 
-function pickNumber(obj: Record<string, unknown>, keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = Number(obj[key]);
-    if (Number.isFinite(value) && value > 0) return value;
-  }
-  return undefined;
-}
-
-function pickString(obj: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function looksLikeBase64(value: string): boolean {
-  if (value.length < 16) return false;
-  const sanitized = value.replace(/\s+/g, '');
-  return /^[A-Za-z0-9+/=]+$/.test(sanitized);
-}
-
-function decodeBase64ToUint8Array(base64: string): Uint8Array {
+function base64ToUint8(base64: string): Uint8Array {
   const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
 }
 
-function pcm16ToAudioBuffer(ctx: AudioContext, bytes: Uint8Array, sampleRate: number): AudioBuffer {
-  const frameCount = Math.floor(bytes.byteLength / 2);
-  const audioBuffer = ctx.createBuffer(1, frameCount, sampleRate);
-  const channel = audioBuffer.getChannelData(0);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let i = 0; i < frameCount; i += 1) {
-    const sample = view.getInt16(i * 2, true);
-    channel[i] = sample / 32768;
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...slice);
   }
-  return audioBuffer;
+  return window.btoa(binary);
+}
+
+function pcm16ToFloat32(pcm16le: Uint8Array): Float32Array {
+  const frames = Math.floor(pcm16le.byteLength / 2);
+  const out = new Float32Array(frames);
+  const view = new DataView(pcm16le.buffer, pcm16le.byteOffset, pcm16le.byteLength);
+  for (let i = 0; i < frames; i += 1) {
+    out[i] = view.getInt16(i * 2, true) / 32768;
+  }
+  return out;
+}
+
+function float32ToPcm16(float32: Float32Array): Uint8Array {
+  const out = new Uint8Array(float32.length * 2);
+  const view = new DataView(out.buffer);
+  for (let i = 0; i < float32.length; i += 1) {
+    const clamped = Math.max(-1, Math.min(1, float32[i]));
+    const sample = clamped < 0 ? clamped * 32768 : clamped * 32767;
+    view.setInt16(i * 2, Math.round(sample), true);
+  }
+  return out;
+}
+
+function resampleLinear(input: Float32Array, inRate: number, outRate: number): Float32Array {
+  if (!input.length || inRate === outRate) return input;
+  const ratio = outRate / inRate;
+  const outLength = Math.max(1, Math.round(input.length * ratio));
+  const out = new Float32Array(outLength);
+  for (let i = 0; i < outLength; i += 1) {
+    const srcIndex = i / ratio;
+    const lo = Math.floor(srcIndex);
+    const hi = Math.min(lo + 1, input.length - 1);
+    const frac = srcIndex - lo;
+    out[i] = input[lo] * (1 - frac) + input[hi] * frac;
+  }
+  return out;
+}
+
+function concatUint8(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (!a.byteLength) return b;
+  if (!b.byteLength) return a;
+  const out = new Uint8Array(a.byteLength + b.byteLength);
+  out.set(a, 0);
+  out.set(b, a.byteLength);
+  return out;
+}
+
+function computeRms(input: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < input.length; i += 1) sum += input[i] * input[i];
+  return Math.sqrt(sum / Math.max(input.length, 1));
 }
 

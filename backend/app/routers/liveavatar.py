@@ -89,6 +89,16 @@ class ElevenLabsSpeakPayload(BaseModel):
     model_id: Optional[str] = None
 
 
+class LiveAvatarSessionPayload(BaseModel):
+    avatar_id: Optional[str] = None
+    voice_id: Optional[str] = None
+    context_id: Optional[str] = None
+    language: str = 'en'
+    video_encoding: Literal['VP8', 'H264'] = 'VP8'
+    video_quality: Literal['low', 'medium', 'high', 'very_high'] = 'high'
+    is_sandbox: bool = False
+
+
 def _pcm16le_24k_mono_to_wav_bytes(pcm: bytes) -> bytes:
     out = BytesIO()
     with wave.open(out, 'wb') as wav_file:
@@ -193,6 +203,43 @@ async def create_and_start_lite_session(payload: Dict[str, Any]):
         )
 
     return JSONResponse(status_code=200, content=body_json)
+
+
+@router.post('/api/liveavatar/session')
+async def create_liveavatar_session(payload: LiveAvatarSessionPayload):
+    settings = get_settings()
+    avatar_id = (payload.avatar_id or settings.liveavatar_avatar_id or settings.liveagent_avatar_id or '').strip()
+    if not avatar_id:
+        return JSONResponse(status_code=400, content={'ok': False, 'error': 'avatar_id is required'})
+
+    client = LiveAvatarLiteClient()
+    token_result = await client.create_session_token(
+        avatar_id=avatar_id,
+        voice_id=payload.voice_id,
+        context_id=payload.context_id,
+        language=payload.language,
+        video_encoding=payload.video_encoding,
+        video_quality=payload.video_quality,
+        is_sandbox=payload.is_sandbox,
+    )
+    if not token_result.get('ok'):
+        return JSONResponse(status_code=502, content={'ok': False, 'error': str(token_result.get('error') or 'token creation failed')})
+
+    session_token = str(token_result.get('session_token') or '')
+    start_result = await client.start_session(session_token=session_token)
+    if not start_result.get('ok'):
+        return JSONResponse(status_code=502, content={'ok': False, 'error': str(start_result.get('error') or 'session start failed')})
+
+    return {
+        'ok': True,
+        'session_id': start_result.get('session_id') or token_result.get('session_id'),
+        'session_token': session_token,
+        'livekit_url': start_result.get('livekit_url'),
+        'livekit_client_token': start_result.get('livekit_client_token'),
+        'livekit_agent_token': start_result.get('livekit_agent_token'),
+        'ws_url': start_result.get('ws_url'),
+        'max_session_duration': start_result.get('max_session_duration'),
+    }
 
 
 @router.post('/api/liveavatar/lite/stop', response_model=LiteStopResponse)

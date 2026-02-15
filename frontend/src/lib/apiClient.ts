@@ -13,6 +13,7 @@ import type {
   LiveAgentSessionStartResponse,
   LiveAgentSessionTokenResponse,
   LiveAvatarLiteCreateResponse,
+  LiveAvatarLiteBridgeSessionResponse,
   LiveAvatarLiteSessionStatus,
   LiveAvatarLiteStartResponse,
   LiveAvatarLiteStopResponse,
@@ -236,6 +237,18 @@ export class ApiClient {
 
   startLiveAvatarLiteSession(payload: { session_token: string }): Promise<LiveAvatarLiteStartResponse> {
     return this.request('/api/liveavatar/lite/start', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  createLiveAvatarSession(payload: {
+    avatar_id?: string;
+    voice_id?: string;
+    context_id?: string;
+    language?: string;
+    video_encoding?: 'VP8' | 'H264';
+    video_quality?: 'low' | 'medium' | 'high' | 'very_high';
+    is_sandbox?: boolean;
+  }): Promise<LiveAvatarLiteBridgeSessionResponse> {
+    return this.request('/api/liveavatar/session', { method: 'POST', body: JSON.stringify(payload) });
   }
 
   createAndStartLiveAvatarLiteSession(payload: {

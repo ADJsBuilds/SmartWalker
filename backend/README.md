@@ -75,6 +75,7 @@ Required env vars:
 
 Signed URL endpoint:
 - `GET /api/eleven/signed-url?agent_id=<agent_id>`
+- Alias: `GET /api/elevenlabs/signed-url?agent_id=<agent_id>`
 - If `agent_id` is omitted, backend uses `ELEVENLABS_AGENT_ID`.
 - Response shape: `{ "signed_url": "wss://..." }`
 
@@ -82,6 +83,21 @@ Optional app session endpoint:
 - `POST /api/eleven/session`
 - Body: `{ "agent_id": "...", "user_id": "..." }` (both optional if default agent is configured)
 - Response shape: `{ "session_id": "<uuid>", "signed_url": "wss://..." }`
+
+LiveAvatar LITE bridge bootstrap endpoint:
+- `POST /api/liveavatar/session`
+- Body (optional fields): `{ "avatar_id", "voice_id", "context_id", "language", "video_encoding", "video_quality", "is_sandbox" }`
+- Uses provider sequence:
+  1) `POST /v1/sessions/token` (X-API-KEY)
+  2) `POST /v1/sessions/start` (Authorization: Bearer session_token)
+- Returns:
+  - `session_id`
+  - `session_token`
+  - `livekit_url`
+  - `livekit_client_token`
+  - `livekit_agent_token`
+  - `ws_url`
+  - `max_session_duration`
 
 Quick curl test:
 
