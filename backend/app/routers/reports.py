@@ -1,6 +1,6 @@
 import json
 from datetime import date as date_type
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +14,14 @@ from app.services.report_pdf import build_daily_pdf
 from app.services.storage import resident_report_path
 
 router = APIRouter(tags=['reports'])
+
+
+def _utc_day_start_ts(day: date_type) -> int:
+    return int(datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp())
+
+
+def _utc_day_end_ts(day: date_type) -> int:
+    return int(datetime(day.year, day.month, day.day, 23, 59, 59, 999999, tzinfo=timezone.utc).timestamp())
 
 
 def _stats_from_rollup(rollup: DailyMetricRollup) -> dict:
@@ -45,8 +53,8 @@ def generate_daily_report(
     except ValueError:
         raise HTTPException(status_code=400, detail='date must be YYYY-MM-DD')
 
-    start_ts = int(datetime.combine(target_date, datetime.min.time()).timestamp())
-    end_ts = int(datetime.combine(target_date, datetime.max.time()).timestamp())
+    start_ts = _utc_day_start_ts(target_date)
+    end_ts = _utc_day_end_ts(target_date)
 
     samples = (
         db.query(MetricSample)
@@ -234,7 +242,7 @@ def report_stats(residentId: str, days: int = 7, db: Session = Depends(get_db)):
     days = max(1, min(days, 30))
     end_day = datetime.utcnow().date()
     start_day = end_day - timedelta(days=days - 1)
-    start_ts = int(datetime.combine(start_day, datetime.min.time()).timestamp())
+    start_ts = _utc_day_start_ts(start_day)
 
     daily_rows = (
         db.query(DailyMetricRollup)
@@ -319,8 +327,8 @@ def backfill_rollups(residentId: str, days: int = 7, db: Session = Depends(get_d
     days = max(1, min(days, 60))
     end_day = datetime.utcnow().date()
     start_day = end_day - timedelta(days=days - 1)
-    start_ts = int(datetime.combine(start_day, datetime.min.time()).timestamp())
-    end_ts = int(datetime.combine(end_day, datetime.max.time()).timestamp())
+    start_ts = _utc_day_start_ts(start_day)
+    end_ts = _utc_day_end_ts(end_day)
 
     samples = (
         db.query(MetricSample)
