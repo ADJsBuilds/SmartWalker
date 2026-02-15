@@ -53,6 +53,8 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   const currentTurnIdRef = useRef<string | null>(null);
   const liveAvatarPcmBufferRef = useRef<Uint8Array>(new Uint8Array(0));
   const elevenOutputRateRef = useRef<number>(16000);
+  const elevenInputRateRef = useRef<number>(ELEVEN_USER_INPUT_RATE);
+  const sentAudioChunksRef = useRef(0);
   const vadHighFramesRef = useRef(0);
   const vadLowFramesRef = useRef(0);
   const lastContextFetchAtRef = useRef(0);
@@ -94,6 +96,13 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     const ws = elevenWsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(payload));
+    const rawAudio = payload.user_audio_chunk;
+    if (typeof rawAudio === 'string') {
+      // Avoid flooding the UI with megabytes of base64 logs.
+      const approxBytes = Math.max(0, Math.floor((rawAudio.length * 3) / 4));
+      appendLog('out', `eleven: {"user_audio_chunk":"<${approxBytes} bytes base64>"}`);
+      return;
+    }
     appendLog('out', `eleven: ${JSON.stringify(payload)}`);
   };
 
@@ -149,6 +158,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   const signalStartListening = () => {
     if (listeningSignaledRef.current) return;
     listeningSignaledRef.current = true;
+    sentAudioChunksRef.current = 0;
     sendLiveAvatarEvent({ type: 'agent.start_listening', event_id: makeEventId() });
     void fetchContextPrompt({ preferCache: false, timeoutMs: 220 });
   };
@@ -156,6 +166,12 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   const signalStopListening = () => {
     if (!listeningSignaledRef.current) return;
     listeningSignaledRef.current = false;
+    if (sentAudioChunksRef.current > 0) {
+      // Eleven websocket examples support chunk streaming; an empty terminal chunk helps
+      // finalize VAD turns quickly when user releases PTT/hands-free capture drops.
+      sendElevenEvent({ user_audio_chunk: '' });
+      appendLog('sys', `Sent end-of-turn audio sentinel (chunks=${sentAudioChunksRef.current})`);
+    }
     sendLiveAvatarEvent({ type: 'agent.stop_listening', event_id: makeEventId() });
   };
 
@@ -297,6 +313,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
       elevenWsRef.current = ws;
       ws.onopen = () => {
         appendLog('sys', `ElevenLabs websocket connected (${session.session_id})`);
+        elevenInputRateRef.current = ELEVEN_USER_INPUT_RATE;
         sendElevenEvent({
           type: 'conversation_initiation_client_data',
           conversation_config_override: {},
@@ -334,6 +351,12 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
           if (parsedRate) {
             elevenOutputRateRef.current = parsedRate;
             appendLog('sys', `Eleven output format=${audioFormat}`);
+          }
+          const userInputFormat = String(metadataEvent.user_input_audio_format || '');
+          const parsedInputRate = parseSampleRate(userInputFormat);
+          if (parsedInputRate) {
+            elevenInputRateRef.current = parsedInputRate;
+            appendLog('sys', `Eleven input format=${userInputFormat}`);
           }
           return;
         }
@@ -453,9 +476,11 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
 
       if (!shouldSendChunk) return;
 
-      const downsampled = resampleLinear(input, ctx.sampleRate, ELEVEN_USER_INPUT_RATE);
+      const targetInputRate = Math.max(8000, elevenInputRateRef.current || ELEVEN_USER_INPUT_RATE);
+      const downsampled = resampleLinear(input, ctx.sampleRate, targetInputRate);
       const pcm16 = float32ToPcm16(downsampled);
       sendElevenEvent({ user_audio_chunk: uint8ToBase64(pcm16) });
+      sentAudioChunksRef.current += 1;
     };
 
     source.connect(processor);

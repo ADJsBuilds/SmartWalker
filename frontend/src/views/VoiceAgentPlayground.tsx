@@ -63,12 +63,13 @@ export function VoiceAgentPlayground() {
   }, [autoMetrics, connected]);
 
   const appendLog = (direction: LogEntry['direction'], payload: unknown) => {
+    const compactPayload = compactLargeAudioPayload(payload);
     setLogs((prev) => [
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         ts: new Date().toLocaleTimeString(),
         direction,
-        payload,
+        payload: compactPayload,
       },
       ...prev,
     ].slice(0, 120));
@@ -411,6 +412,29 @@ function safePrettyJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function compactLargeAudioPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object') return payload;
+  const asRecord = payload as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...asRecord };
+
+  const userAudio = out.user_audio_chunk;
+  if (typeof userAudio === 'string') {
+    out.user_audio_chunk = `<${Math.max(0, Math.floor((userAudio.length * 3) / 4))} bytes base64>`;
+  }
+
+  const audioEvent = out.audio_event;
+  if (audioEvent && typeof audioEvent === 'object') {
+    const audioRecord = { ...(audioEvent as Record<string, unknown>) };
+    const b64 = audioRecord.audio_base_64;
+    if (typeof b64 === 'string') {
+      audioRecord.audio_base_64 = `<${Math.max(0, Math.floor((b64.length * 3) / 4))} bytes base64>`;
+    }
+    out.audio_event = audioRecord;
+  }
+
+  return out;
 }
 
 function randomInRange(min: number, max: number): number {
