@@ -286,9 +286,17 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
         }
       },
     });
-    ws.connect();
-    wsRef.current = ws;
-    return () => ws.close();
+    let cancelled = false;
+    const connectTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      ws.connect();
+      wsRef.current = ws;
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(connectTimer);
+      ws.close();
+    };
   }, [apiBaseUrl, updateResidentData]);
 
   useEffect(() => {
