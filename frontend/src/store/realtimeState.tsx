@@ -58,6 +58,8 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const wsRef = useRef<SmartWalkerWsClient | null>(null);
+  const latestMergedRef = useRef<Record<string, MergedState>>({});
+  const injectMockTickRef = useRef<() => void>(() => {});
   const apiClient = useMemo(() => new ApiClient(apiBaseUrl), [apiBaseUrl]);
 
   const addToast = useCallback((message: string, level: ToastMessage['level'] = 'info') => {
@@ -81,10 +83,14 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
   const updateResidentData = useCallback(
     (merged: MergedState, source: EventLogEntry['source']) => {
       const residentId = merged.residentId;
-      const prev = latestMergedByResidentId[residentId];
+      const prev = latestMergedRef.current[residentId];
       const changedFields = getChangedFields(prev, merged);
 
-      setLatestMergedByResidentId((old) => ({ ...old, [residentId]: merged }));
+      setLatestMergedByResidentId((old) => {
+        const next = { ...old, [residentId]: merged };
+        latestMergedRef.current = next;
+        return next;
+      });
       setLastUpdatedByResidentId((old) => ({ ...old, [residentId]: Date.now() }));
       setLastMergedTsByResidentId((old) => ({ ...old, [residentId]: Number(merged.ts || 0) }));
 
@@ -99,12 +105,12 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
         changedFields: changedFields.length ? changedFields : ['(no delta)'],
       });
     },
-    [latestMergedByResidentId, pushEvent],
+    [pushEvent],
   );
 
   const injectMockTick = useCallback(() => {
     const residentId = activeResidentId;
-    const prev = latestMergedByResidentId[residentId];
+    const prev = latestMergedRef.current[residentId];
     const steps = Number(prev?.metrics.steps || 0) + 1 + Math.floor(Math.random() * 3);
     const tilt = simulateFall ? 67 : 3 + Math.random() * 6;
     const fall = simulateFall || tilt >= 60;
@@ -127,7 +133,7 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
       },
       'mock',
     );
-  }, [activeResidentId, latestMergedByResidentId, simulateFall, updateResidentData]);
+  }, [activeResidentId, simulateFall, updateResidentData]);
 
   const refreshResidentState = useCallback(
     async (residentId?: string) => {
@@ -159,7 +165,7 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
 
   const sendTestWalkerPacket = useCallback(async () => {
     const residentId = activeResidentId;
-    const prev = latestMergedByResidentId[residentId];
+    const prev = latestMergedRef.current[residentId];
     const nextSteps = Number(prev?.metrics.steps || 0) + 2;
     const payload = {
       residentId,
@@ -181,7 +187,7 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
         setMockMode(true);
       }
     }
-  }, [activeResidentId, addToast, apiClient, injectMockTick, latestMergedByResidentId, pushEvent, refreshResidentState, simulateFall]);
+  }, [activeResidentId, addToast, apiClient, injectMockTick, pushEvent, refreshResidentState, simulateFall]);
 
   const sendTestVisionPacket = useCallback(async () => {
     const residentId = activeResidentId;
@@ -211,6 +217,14 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
   }, [apiBaseUrl]);
 
   useEffect(() => {
+    latestMergedRef.current = latestMergedByResidentId;
+  }, [latestMergedByResidentId]);
+
+  useEffect(() => {
+    injectMockTickRef.current = injectMockTick;
+  }, [injectMockTick]);
+
+  useEffect(() => {
     const checkHealth = async () => {
       try {
         const result = await apiClient.health();
@@ -231,14 +245,14 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
           setApiStatus('offline');
           setMockMode(true);
           addToast('Backend unreachable. Running in mock mode.', 'warn');
-          injectMockTick();
+          injectMockTickRef.current();
           return;
         }
         setApiStatus('degraded');
       }
     };
     checkHealth();
-  }, [addToast, apiClient, injectMockTick]);
+  }, [addToast, apiBaseUrl, apiClient]);
 
   useEffect(() => {
     const loadResidents = async () => {
@@ -280,6 +294,16 @@ export function RealtimeStateProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     refreshResidentState(activeResidentId);
   }, [activeResidentId, refreshResidentState]);
+
+  useEffect(() => {
+    const residentIdsWithData = Object.keys(latestMergedByResidentId);
+    if (!residentIdsWithData.length) return;
+    if (residentIdsWithData.includes(activeResidentId)) return;
+    const fallbackResidentId = residentIdsWithData[0];
+    setActiveResidentId(fallbackResidentId);
+    setResidentInput(fallbackResidentId);
+    addToast(`Switched resident to ${fallbackResidentId} (latest stream with data).`, 'info');
+  }, [activeResidentId, addToast, latestMergedByResidentId]);
 
   useEffect(() => {
     if (!mockMode) return;
