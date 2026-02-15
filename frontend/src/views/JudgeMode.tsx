@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ElevenLabsConversationPanel } from '../components/ElevenLabsConversationPanel';
 import { MetricCard } from '../components/MetricCard';
 import { isNotImplementedError } from '../lib/apiClient';
 import { LiveAgentController } from '../lib/liveAgent';
@@ -21,8 +20,6 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
   const [isListening, setListening] = useState(false);
   const [liveAgentStatus, setLiveAgentStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'>('idle');
   const [liveAgentTranscript, setLiveAgentTranscript] = useState<string>('');
-  const [liteSpeakText, setLiteSpeakText] = useState('Hello from ElevenLabs on SmartWalker.');
-  const [liteSpeakBusy, setLiteSpeakBusy] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const coachVideoRef = useRef<HTMLVideoElement | null>(null);
   const liveAgentRef = useRef<LiveAgentController | null>(null);
@@ -182,32 +179,6 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
     }
   };
 
-  const speakViaElevenLabs = async () => {
-    const text = liteSpeakText.trim();
-    if (!text) {
-      notify('Enter text to synthesize.', 'warn');
-      return;
-    }
-    let objectUrl = '';
-    try {
-      setLiteSpeakBusy(true);
-      const audioBlob = await apiClient.speakElevenLabs({
-        text,
-      });
-      objectUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(objectUrl);
-      await audio.play();
-      notify('Playing ElevenLabs voice.', 'info');
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'ElevenLabs speech playback failed.', 'warn');
-    } finally {
-      if (objectUrl) {
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
-      }
-      setLiteSpeakBusy(false);
-    }
-  };
-
   return (
     <section className="space-y-4 pb-28">
       <div className="rounded-2xl bg-slate-900 p-4 sm:p-6">
@@ -256,8 +227,6 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
         )}
       </div>
 
-      <ElevenLabsConversationPanel apiClient={apiClient} residentId={activeResidentId} notify={notify} />
-
       <div className="rounded-2xl bg-slate-900 p-4 sm:p-6">
         <h3 className="text-2xl font-black text-white">HeyGen Coach</h3>
         <div className="mt-3 grid gap-4 lg:grid-cols-2">
@@ -294,22 +263,6 @@ export function JudgeMode({ mergedState }: JudgeModeProps) {
             <button type="button" onClick={() => playCoach(coachText)} className="w-full rounded-xl bg-sky-600 px-4 py-3 text-lg font-black text-white">
               Play Coach
             </button>
-            <div className="rounded-xl border border-slate-700 bg-slate-950 p-3">
-              <p className="text-xs font-semibold text-slate-300">ElevenLabs Voice Test (no LiveAvatar required)</p>
-              <textarea
-                value={liteSpeakText}
-                onChange={(event) => setLiteSpeakText(event.target.value)}
-                className="mt-2 h-20 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-              />
-              <button
-                type="button"
-                disabled={liteSpeakBusy}
-                onClick={speakViaElevenLabs}
-                className="mt-2 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {liteSpeakBusy ? 'Sending...' : 'Speak Text (ElevenLabs)'}
-              </button>
-            </div>
           </div>
 
           <div className="space-y-3">
@@ -354,4 +307,3 @@ function display(value: unknown): string {
   const n = Number(value);
   return Number.isFinite(n) ? String(Math.round(n * 100) / 100) : '-';
 }
-
