@@ -23,7 +23,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-base text-white"
-            placeholder="http://localhost:8000"
+            placeholder="https://smartwalker-back.onrender.com"
           />
         </label>
         <div className="mt-5 flex justify-end gap-2">
