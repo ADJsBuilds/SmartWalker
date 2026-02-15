@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     liveavatar_language: str = 'en'
     liveavatar_interactivity_type: str = 'PUSH_TO_TALK'
     include_provider_raw: bool = False
+    openai_api_key: str = Field(default='', validation_alias='OPENAI_API_KEY')
+    openai_base_url: str = Field(default='https://api.openai.com/v1', validation_alias='OPENAI_BASE_URL')
+    openai_stt_model: str = 'gpt-4o-transcribe'
+    openai_sql_model: str = 'gpt-5-mini'
+    openai_answer_model: str = 'gpt-5'
+    openai_tts_model: str = 'gpt-4o-mini-tts'
+    openai_tts_voice: str = 'alloy'
     ingest_persist_interval_seconds: int = 5
     ingest_store_full_payload_every_n_samples: int = 3
     cors_allow_origins: List[str] = ['*']

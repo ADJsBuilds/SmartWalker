@@ -29,6 +29,8 @@ const QNA_FETCH_TIMEOUT_MS = 320;
 const REALTIME_CONTEXT_MIN_INTERVAL_MS = 5000;
 const REALTIME_CONTEXT_MAX_CHARS = 360;
 const TOOL_RESULT_MAX_CHARS = 480;
+const MAX_OUTBOUND_TEXT_CHARS = 150;
+const DIAGNOSTIC_DISABLE_DB_CONTEXT = true;
 const LIVEAVATAR_LOG_SUPPRESSED_TYPES = new Set([
   'session.keep_alive',
   'agent.start_listening',
@@ -106,6 +108,11 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     return out;
   };
 
+  const clampOutboundText = (value: string): string => {
+    const trimmed = value.trim();
+    return trimmed.length <= MAX_OUTBOUND_TEXT_CHARS ? trimmed : trimmed.slice(0, MAX_OUTBOUND_TEXT_CHARS).trim();
+  };
+
   const sendLiveAvatarEvent = (payload: Record<string, unknown>) => {
     const ws = liveAvatarWsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -119,15 +126,22 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   const sendElevenEvent = (payload: Record<string, unknown>) => {
     const ws = elevenWsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify(payload));
-    const rawAudio = payload.user_audio_chunk;
+    const outboundPayload: Record<string, unknown> = { ...payload };
+    if (typeof outboundPayload.text === 'string') {
+      outboundPayload.text = clampOutboundText(outboundPayload.text);
+    }
+    if (typeof outboundPayload.result === 'string') {
+      outboundPayload.result = clampOutboundText(outboundPayload.result);
+    }
+    ws.send(JSON.stringify(outboundPayload));
+    const rawAudio = outboundPayload.user_audio_chunk;
     if (typeof rawAudio === 'string') {
       // Avoid flooding the UI with megabytes of base64 logs.
       const approxBytes = Math.max(0, Math.floor((rawAudio.length * 3) / 4));
       appendLog('out', `eleven: {"user_audio_chunk":"<${approxBytes} bytes base64>"}`);
       return;
     }
-    appendLog('out', `eleven: ${JSON.stringify(payload)}`);
+    appendLog('out', `eleven: ${JSON.stringify(outboundPayload)}`);
   };
 
   const compactIncomingElevenPayload = (payload: Record<string, unknown>): Record<string, unknown> => {
@@ -146,6 +160,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   };
 
   const fetchContextPrompt = async (options?: { preferCache?: boolean; timeoutMs?: number }): Promise<string> => {
+    if (DIAGNOSTIC_DISABLE_DB_CONTEXT) return '';
     const preferCache = options?.preferCache ?? true;
     const timeoutMs = Math.max(80, options?.timeoutMs ?? CONTEXT_FETCH_TIMEOUT_MS);
     const now = Date.now();
@@ -172,6 +187,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   };
 
   const fetchQnaContextBlock = async (question: string, options?: { timeoutMs?: number }): Promise<string> => {
+    if (DIAGNOSTIC_DISABLE_DB_CONTEXT) return '';
     const trimmed = question.trim();
     if (!trimmed) return '';
     const timeoutMs = Math.max(120, options?.timeoutMs ?? QNA_FETCH_TIMEOUT_MS);
@@ -248,6 +264,7 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
   };
 
   const pushRealtimeContextUpdate = async (question?: string) => {
+    if (DIAGNOSTIC_DISABLE_DB_CONTEXT) return;
     const now = Date.now();
     if (now - lastContextFetchAtRef.current < REALTIME_CONTEXT_MIN_INTERVAL_MS) return;
     lastContextFetchAtRef.current = now;
@@ -289,6 +306,16 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
       return;
     }
     const toolName = String(call.tool_name || call.name || 'unknown_tool');
+    if (DIAGNOSTIC_DISABLE_DB_CONTEXT) {
+      sendElevenEvent({
+        type: 'client_tool_result',
+        tool_call_id: toolCallId,
+        result: 'Context is temporarily disabled for diagnostics.',
+        is_error: false,
+      });
+      appendLog('sys', `Replied to client_tool_call name=${toolName} id=${toolCallId} with diagnostic fallback`);
+      return;
+    }
     const question = parseToolCallQuestion(call.parameters ?? call.arguments ?? call.input ?? call.params);
     const qnaContext = question ? await fetchQnaContextBlock(question, { timeoutMs: 260 }) : '';
     const fallbackContext = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 220 });
@@ -752,14 +779,8 @@ export function ElevenLabsConversationPanel({ apiClient, residentId, notify }: E
     const text = inputText.trim();
     if (!text) return;
     setLastUserText(text);
-    const qnaContext = await fetchQnaContextBlock(text, { timeoutMs: 280 });
-    const contextPrompt = qnaContext || await fetchContextPrompt({ preferCache: true, timeoutMs: 240 });
-    const contextIsMissingDataOnly = contextPrompt.toLowerCase().startsWith('no recent exercise samples are available');
-    const contextualText = contextPrompt && !contextIsMissingDataOnly
-      ? `Use only the following exercise context facts when relevant. If data is missing, say so briefly.\nContext: ${contextPrompt}\n\nUser question: ${text}`
-      : text;
     const turnId = makeEventId();
-    sendElevenEvent({ type: 'user_message', text: contextualText });
+    sendElevenEvent({ type: 'user_message', text });
     scheduleTextTurnWatchdog(turnId, text);
     setInputText('');
   };

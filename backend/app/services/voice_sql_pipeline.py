@@ -1,0 +1,213 @@
+import json
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+import httpx
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+
+
+_SCHEMA_CONTEXT = """
+Tables:
+- residents(id, name, created_at)
+- clinician_documents(id, resident_id, filename, filepath, uploaded_at, extracted_text, source_type)
+- document_chunks(id, doc_id, resident_id, chunk_index, text)
+- walking_sessions(id, resident_id, start_ts, end_ts, summary_json)
+- metric_samples(id, resident_id, ts, walker_json, vision_json, merged_json)
+- ingest_events(id, resident_id, ts, event_type, severity, payload_json, created_at)
+- hourly_metric_rollups(id, resident_id, bucket_start_ts, date, sample_count, steps_max, cadence_sum, cadence_count, step_var_sum, step_var_count, fall_count, tilt_spike_count, heavy_lean_count, inactivity_count, active_seconds, updated_at)
+- daily_metric_rollups(id, resident_id, date, sample_count, steps_max, cadence_sum, cadence_count, step_var_sum, step_var_count, fall_count, tilt_spike_count, heavy_lean_count, inactivity_count, active_seconds, updated_at)
+- exercise_metric_samples(
+  id, resident_id, camera_id, ts, fall_suspected, fall_count, total_time_on_ground_seconds,
+  posture_state, step_count, cadence_spm, avg_cadence_spm, step_time_cv, step_time_mean,
+  activity_state, asymmetry_index, fall_risk_level, fall_risk_score, fog_status, fog_episodes,
+  fog_duration_seconds, person_detected, confidence, source_fps, frame_id, steps_merged, tilt_deg, step_var, created_at
+)
+""".strip()
+
+
+def _extract_output_text(payload: Dict[str, Any]) -> str:
+    direct = payload.get('output_text')
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+
+    output = payload.get('output')
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content = item.get('content')
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                text_value = part.get('text') or part.get('output_text')
+                if isinstance(text_value, str) and text_value.strip():
+                    return text_value.strip()
+    return ''
+
+
+class VoiceSqlPipeline:
+    def __init__(self) -> None:
+        self.settings = get_settings()
+
+    def _headers(self) -> Dict[str, str]:
+        api_key = (self.settings.openai_api_key or '').strip()
+        return {
+            'Authorization': f'Bearer {api_key}',
+        }
+
+    def _base_url(self) -> str:
+        return (self.settings.openai_base_url or 'https://api.openai.com/v1').rstrip('/')
+
+    async def transcribe_audio(self, audio_bytes: bytes, mime_type: str = 'audio/webm') -> str:
+        api_key = (self.settings.openai_api_key or '').strip()
+        if not api_key:
+            raise RuntimeError('OPENAI_API_KEY is not configured')
+        if not audio_bytes:
+            return ''
+
+        model = (self.settings.openai_stt_model or 'gpt-4o-transcribe').strip()
+        files = {'file': ('speech_input.webm', audio_bytes, mime_type)}
+        data = {'model': model}
+        url = f'{self._base_url()}/audio/transcriptions'
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.post(url, headers=self._headers(), files=files, data=data)
+            response.raise_for_status()
+            payload = response.json()
+        transcript = payload.get('text') if isinstance(payload, dict) else ''
+        return str(transcript or '').strip()
+
+    async def generate_sql(self, question: str, resident_id: str) -> str:
+        api_key = (self.settings.openai_api_key or '').strip()
+        if not api_key:
+            raise RuntimeError('OPENAI_API_KEY is not configured')
+        model = (self.settings.openai_sql_model or 'gpt-5-mini').strip()
+        instruction = (
+            "You are a text-to-SQL generator. Output JSON only with shape "
+            '{"sql":"...","summary":"..."}. '
+            "Generate one SQL query for SQLite using the provided schema. "
+            "Prefer resident-filtered queries using resident_id when relevant."
+        )
+        user_text = (
+            f"resident_id: {resident_id}\n"
+            f"question: {question}\n\n"
+            f"schema:\n{_SCHEMA_CONTEXT}"
+        )
+        payload = {
+            'model': model,
+            'input': [
+                {'role': 'system', 'content': instruction},
+                {'role': 'user', 'content': user_text},
+            ],
+            'temperature': 0.1,
+        }
+        url = f'{self._base_url()}/responses'
+        async with httpx.AsyncClient(timeout=httpx.Timeout(45.0)) as client:
+            response = await client.post(url, headers={**self._headers(), 'Content-Type': 'application/json'}, json=payload)
+            response.raise_for_status()
+            raw = response.json()
+        output_text = _extract_output_text(raw)
+        if not output_text:
+            raise RuntimeError('SQL generation returned empty output')
+
+        parsed: Optional[Dict[str, Any]] = None
+        try:
+            parsed = json.loads(output_text)
+        except json.JSONDecodeError:
+            first = output_text.find('{')
+            last = output_text.rfind('}')
+            if first != -1 and last != -1 and last > first:
+                parsed = json.loads(output_text[first : last + 1])
+        if not isinstance(parsed, dict):
+            raise RuntimeError('Unable to parse SQL generation response as JSON')
+        sql = str(parsed.get('sql') or '').strip().rstrip(';')
+        if not sql:
+            raise RuntimeError('Generated SQL is empty')
+        return sql
+
+    def execute_sql(self, db: Session, sql: str) -> List[Dict[str, Any]]:
+        try:
+            result = db.execute(text(sql))
+        except SQLAlchemyError as exc:
+            raise RuntimeError(f'SQL execution failed: {exc}') from exc
+
+        if not result.returns_rows:
+            db.commit()
+            return [{'rows_affected': int(result.rowcount or 0)}]
+
+        rows = result.fetchmany(50)
+        keys = list(result.keys())
+        output: List[Dict[str, Any]] = []
+        for row in rows:
+            row_map = {}
+            for key in keys:
+                value = row._mapping.get(key)
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    row_map[str(key)] = value
+                else:
+                    row_map[str(key)] = str(value)
+            output.append(row_map)
+        return output
+
+    async def generate_answer(self, *, question: str, resident_id: str, sql: str, rows: List[Dict[str, Any]]) -> str:
+        api_key = (self.settings.openai_api_key or '').strip()
+        if not api_key:
+            raise RuntimeError('OPENAI_API_KEY is not configured')
+        model = (self.settings.openai_answer_model or 'gpt-5').strip()
+        system = (
+            "You are a concise physical therapy assistant for SmartWalker. "
+            "Answer based on SQL results only. If data is sparse, say so clearly."
+        )
+        user = (
+            f"resident_id: {resident_id}\n"
+            f"question: {question}\n"
+            f"sql: {sql}\n"
+            f"rows: {json.dumps(rows, ensure_ascii=True)}\n\n"
+            "Return 2-4 short sentences that are easy to speak aloud."
+        )
+        payload = {
+            'model': model,
+            'input': [
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': user},
+            ],
+            'temperature': 0.3,
+        }
+        url = f'{self._base_url()}/responses'
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.post(url, headers={**self._headers(), 'Content-Type': 'application/json'}, json=payload)
+            response.raise_for_status()
+            raw = response.json()
+        answer = _extract_output_text(raw).strip()
+        if not answer:
+            return 'I could not find enough data to answer that confidently yet.'
+        return answer
+
+    async def stream_tts_pcm(self, text_value: str) -> AsyncIterator[bytes]:
+        api_key = (self.settings.openai_api_key or '').strip()
+        if not api_key:
+            raise RuntimeError('OPENAI_API_KEY is not configured')
+        model = (self.settings.openai_tts_model or 'gpt-4o-mini-tts').strip()
+        voice = (self.settings.openai_tts_voice or 'alloy').strip()
+        payload = {
+            'model': model,
+            'voice': voice,
+            'input': text_value,
+            'response_format': 'pcm',
+        }
+        url = f'{self._base_url()}/audio/speech'
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            async with client.stream(
+                'POST',
+                url,
+                headers={**self._headers(), 'Content-Type': 'application/json'},
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    if chunk:
+                        yield chunk
