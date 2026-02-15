@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartwalker-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: smartwalker
+      POSTGRES_USER: smartwalker
+      POSTGRES_PASSWORD: smartwalker
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartwalker -d smartwalker"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartwalker-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: local
+      LOG_LEVEL: INFO
+      CORS_ALLOW_ORIGINS: '["*"]'
+      DATABASE_URL: postgresql+psycopg2://smartwalker:smartwalker@postgres:5432/smartwalker
+      STORAGE_DIR: /app/data
+      OPENAI_API_KEY: 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
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  postgres_data:
+  backend_data:

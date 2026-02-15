@@ -1,0 +1,2528 @@
+openapi: 3.1.0
+info:
+  title: SmartWalker Backend API
+  version: 0.1.0
+  description: REST API and websocket contract for SmartWalker backend.\n\nREST operations
+    are standard OpenAPI paths. Websocket contracts are documented under x-websockets.
+paths:
+  /health:
+    get:
+      tags:
+      - health
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/walker:
+    post:
+      tags:
+      - ingest
+      summary: Post Walker
+      operationId: post_walker_api_walker_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalkerPacket'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/vision:
+    post:
+      tags:
+      - ingest
+      summary: Post Vision
+      operationId: post_vision_api_vision_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisionPacket'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/state/{resident_id}:
+    get:
+      tags:
+      - ingest
+      summary: Get State
+      operationId: get_state_api_state__resident_id__get
+      parameters:
+      - name: resident_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Resident Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/residents:
+    get:
+      tags:
+      - patients
+      summary: List Residents
+      operationId: list_residents_api_residents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+    post:
+      tags:
+      - patients
+      summary: Create Resident
+      operationId: create_resident_api_residents_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResidentCreate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/residents/{resident_id}:
+    get:
+      tags:
+      - patients
+      summary: Get Resident
+      operationId: get_resident_api_residents__resident_id__get
+      parameters:
+      - name: resident_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Resident Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/residents/{resident_id}/documents:
+    post:
+      tags:
+      - documents
+      summary: Upload Document
+      operationId: upload_document_api_residents__resident_id__documents_post
+      parameters:
+      - name: resident_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Resident Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_document_api_residents__resident_id__documents_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - documents
+      summary: List Documents
+      operationId: list_documents_api_residents__resident_id__documents_get
+      parameters:
+      - name: resident_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Resident Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/documents/{doc_id}:
+    get:
+      tags:
+      - documents
+      summary: Get Document
+      operationId: get_document_api_documents__doc_id__get
+      parameters:
+      - name: doc_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Doc Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/reports/daily/generate:
+    post:
+      tags:
+      - reports
+      summary: Generate Daily Report
+      operationId: generate_daily_report_api_reports_daily_generate_post
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Residentid
+      - name: date
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Date
+      - name: usePlaceholder
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Useplaceholder
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/reports/daily/{report_id}/download:
+    get:
+      tags:
+      - reports
+      summary: Download Report
+      operationId: download_report_api_reports_daily__report_id__download_get
+      parameters:
+      - name: report_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Report Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/reports/stats:
+    get:
+      tags:
+      - reports
+      summary: Report Stats
+      operationId: report_stats_api_reports_stats_get
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Residentid
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 7
+          title: Days
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/reports/rollups/backfill:
+    post:
+      tags:
+      - reports
+      summary: Backfill Rollups
+      operationId: backfill_rollups_api_reports_rollups_backfill_post
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Residentid
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 7
+          title: Days
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/suggestions/exercise-regimen:
+    get:
+      tags:
+      - suggestions
+      summary: Get Exercise Regimen Suggestions
+      operationId: get_exercise_regimen_suggestions_api_suggestions_exercise_regimen_get
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Residentid
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 7
+          title: Days
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/exercise-metrics/live:
+    get:
+      tags:
+      - exercise-metrics
+      summary: Get Live Metrics
+      description: 'Recent normalized metric rows for the live exercise tab.
+
+        Ordered by ts descending (newest first).'
+      operationId: get_live_metrics_api_exercise_metrics_live_get
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Resident id, e.g. r1
+          title: Residentid
+        description: Resident id, e.g. r1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          description: Max rows to return
+          default: 100
+          title: Limit
+        description: Max rows to return
+      - name: sinceTs
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          description: Only return rows with ts >= this (Unix seconds)
+          title: Sincets
+        description: Only return rows with ts >= this (Unix seconds)
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/exercise-metrics/context-window:
+    get:
+      tags:
+      - exercise-metrics
+      summary: Get Context Window
+      operationId: get_context_window_api_exercise_metrics_context_window_get
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Resident id, e.g. r1
+          title: Residentid
+        description: Resident id, e.g. r1
+      - name: maxSamples
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Maximum rows in the returned context window
+          default: 50
+          title: Maxsamples
+        description: Maximum rows in the returned context window
+      - name: stepWindow
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          description: Step window (currentStep-stepWindow..currentStep)
+          default: 50
+          title: Stepwindow
+        description: Step window (currentStep-stepWindow..currentStep)
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/exercise-metrics/qna-context:
+    get:
+      tags:
+      - exercise-metrics
+      summary: Get Qna Context
+      operationId: get_qna_context_api_exercise_metrics_qna_context_get
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Resident id, e.g. r1
+          title: Residentid
+        description: Resident id, e.g. r1
+      - name: question
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          description: Current user question
+          title: Question
+        description: Current user question
+      - name: maxSamples
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Maximum rows used for Q&A grounding
+          default: 50
+          title: Maxsamples
+        description: Maximum rows used for Q&A grounding
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/exercise-metrics/aggregates:
+    get:
+      tags:
+      - exercise-metrics
+      summary: Get Aggregates
+      description: 'Daily aggregates from exercise_metric_samples for homepage and
+        doctor view.
+
+        Returns one entry per day with steps_max, fall_count, cadence/step_var averages,
+        etc.'
+      operationId: get_aggregates_api_exercise_metrics_aggregates_get
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Resident id
+          title: Residentid
+        description: Resident id
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 90
+          minimum: 1
+          description: Number of days of history
+          default: 7
+          title: Days
+        description: Number of days of history
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/exercise-metrics/summary:
+    get:
+      tags:
+      - exercise-metrics
+      summary: Get Summary
+      description: 'Single summary object for homepage/doctor: totals and recent activity.'
+      operationId: get_summary_api_exercise_metrics_summary_get
+      parameters:
+      - name: residentId
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Resident id
+          title: Residentid
+        description: Resident id
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 90
+          minimum: 1
+          default: 7
+          title: Days
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/agent/ask:
+    post:
+      tags:
+      - agent
+      summary: Ask Agent
+      operationId: ask_agent_api_agent_ask_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentAskPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/coach/script:
+    post:
+      tags:
+      - agent
+      summary: Build Coach Script
+      operationId: build_coach_script_api_coach_script_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoachScriptPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoachScriptResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/integrations/openevidence:
+    post:
+      tags:
+      - integrations
+      summary: Openevidence Proxy
+      operationId: openevidence_proxy_api_integrations_openevidence_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenEvidencePayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/integrations/heygen:
+    post:
+      tags:
+      - integrations
+      summary: Heygen Proxy
+      description: Deprecated passthrough endpoint kept for backward compatibility.
+      operationId: heygen_proxy_api_integrations_heygen_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeyGenPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/heygen/avatars:
+    get:
+      tags:
+      - integrations
+      summary: List Heygen Avatars Deprecated
+      operationId: list_heygen_avatars_deprecated_api_heygen_avatars_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/heygen/speak:
+    post:
+      tags:
+      - integrations
+      summary: Heygen Speak
+      description: Deprecated endpoint kept temporarily to avoid breaking legacy coach
+        actions.
+      operationId: heygen_speak_api_heygen_speak_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeyGenSpeakPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveagent/session/token:
+    post:
+      tags:
+      - integrations
+      summary: Create Liveagent Session Token
+      operationId: create_liveagent_session_token_api_liveagent_session_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveAgentSessionTokenPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveAgentSessionTokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveagent/session/start:
+    post:
+      tags:
+      - integrations
+      summary: Start Liveagent Session
+      operationId: start_liveagent_session_api_liveagent_session_start_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveAgentStartPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveAgentStartResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveagent/session/bootstrap:
+    post:
+      tags:
+      - integrations
+      summary: Bootstrap Liveagent Session
+      operationId: bootstrap_liveagent_session_api_liveagent_session_bootstrap_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveAgentSessionTokenPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveAgentBootstrapResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveagent/session/stop:
+    post:
+      tags:
+      - integrations
+      summary: Stop Liveagent Session
+      operationId: stop_liveagent_session_api_liveagent_session_stop_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveAgentStopPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveagent/session/event:
+    post:
+      tags:
+      - integrations
+      summary: Send Liveagent Session Event
+      operationId: send_liveagent_session_event_api_liveagent_session_event_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveAgentSessionEventPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveAgentSessionEventResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/carrier/zoom-invite:
+    post:
+      tags:
+      - carrier
+      summary: Zoom Invite
+      description: Resolve contact from label or phrase, create a Zoom meeting, and
+        email the join link.
+      operationId: zoom_invite_api_carrier_zoom_invite_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZoomInvitePayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /heygen/session/token:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Create Lite Token
+      operationId: create_lite_token_heygen_session_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteCreatePayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiteCreateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/create:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Create Lite Token
+      operationId: create_lite_token_api_liveavatar_lite_create_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteCreatePayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiteCreateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /heygen/session/start:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Start Lite Session
+      operationId: start_lite_session_heygen_session_start_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteStartPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiteStartResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/start:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Start Lite Session
+      operationId: start_lite_session_api_liveavatar_lite_start_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteStartPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiteStartResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/new:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Create And Start Lite Session
+      operationId: create_and_start_lite_session_api_liveavatar_lite_new_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              title: Payload
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/session:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Create Liveavatar Session
+      operationId: create_liveavatar_session_api_liveavatar_session_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveAvatarSessionPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /heygen/session/stop:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Stop Lite Session
+      operationId: stop_lite_session_heygen_session_stop_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteStopPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiteStopResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/stop:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Stop Lite Session
+      operationId: stop_lite_session_api_liveavatar_lite_stop_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteStopPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiteStopResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/status/{session_id}:
+    get:
+      tags:
+      - liveavatar-lite
+      summary: Lite Session Status
+      operationId: lite_session_status_api_liveavatar_lite_status__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/interrupt:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Interrupt Lite
+      operationId: interrupt_lite_api_liveavatar_lite_interrupt_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteSessionControlPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/start-listening:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Start Listening Lite
+      operationId: start_listening_lite_api_liveavatar_lite_start_listening_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteSessionControlPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/stop-listening:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Stop Listening Lite
+      operationId: stop_listening_lite_api_liveavatar_lite_stop_listening_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteSessionControlPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/keepalive:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Keepalive Lite
+      operationId: keepalive_lite_api_liveavatar_lite_keepalive_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteSessionControlPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/test-tone:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Speak Test Tone
+      operationId: speak_test_tone_api_liveavatar_lite_test_tone_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteSpeakTonePayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/liveavatar/lite/speak-text:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Speak Text Lite
+      operationId: speak_text_lite_api_liveavatar_lite_speak_text_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiteSpeakTextPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/elevenlabs/speak:
+    post:
+      tags:
+      - liveavatar-lite
+      summary: Elevenlabs Speak
+      operationId: elevenlabs_speak_api_elevenlabs_speak_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ElevenLabsSpeakPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/eleven/signed-url:
+    get:
+      tags:
+      - eleven
+      summary: Eleven Signed Url
+      operationId: eleven_signed_url_api_eleven_signed_url_get
+      parameters:
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/elevenlabs/signed-url:
+    get:
+      tags:
+      - eleven
+      summary: Elevenlabs Signed Url Alias
+      operationId: elevenlabs_signed_url_alias_api_elevenlabs_signed_url_get
+      parameters:
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/eleven/session:
+    post:
+      tags:
+      - eleven
+      summary: Create Eleven Session
+      operationId: create_eleven_session_api_eleven_session_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ElevenSessionPayload'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AgentAskPayload:
+      properties:
+        residentId:
+          type: string
+          title: Residentid
+        question:
+          type: string
+          title: Question
+        conversationId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversationid
+      type: object
+      required:
+      - residentId
+      - question
+      title: AgentAskPayload
+    Body_upload_document_api_residents__resident_id__documents_post:
+      properties:
+        file:
+          type: string
+          format: binary
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_upload_document_api_residents__resident_id__documents_post
+    CoachScriptPayload:
+      properties:
+        residentId:
+          type: string
+          title: Residentid
+        context:
+          type: object
+          title: Context
+        goal:
+          type: string
+          enum:
+          - encourage
+          - correct_posture
+          - safety_warning
+          - answer_question
+          title: Goal
+          default: encourage
+        tone:
+          type: string
+          enum:
+          - calm
+          - energetic
+          title: Tone
+          default: calm
+        userPrompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Userprompt
+      type: object
+      required:
+      - residentId
+      title: CoachScriptPayload
+    CoachScriptResponse:
+      properties:
+        script:
+          type: string
+          title: Script
+        intent:
+          type: string
+          title: Intent
+        safetyFlags:
+          items:
+            type: string
+          type: array
+          title: Safetyflags
+        meta:
+          type: object
+          title: Meta
+        reason:
+          type: string
+          title: Reason
+      type: object
+      required:
+      - script
+      - intent
+      - safetyFlags
+      - meta
+      - reason
+      title: CoachScriptResponse
+    ElevenLabsSpeakPayload:
+      properties:
+        text:
+          type: string
+          title: Text
+        voice_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Voice Id
+        model_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model Id
+      type: object
+      required:
+      - text
+      title: ElevenLabsSpeakPayload
+    ElevenSessionPayload:
+      properties:
+        agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+      type: object
+      title: ElevenSessionPayload
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HeyGenPayload:
+      properties:
+        payload:
+          type: object
+          title: Payload
+      type: object
+      required:
+      - payload
+      title: HeyGenPayload
+    HeyGenSpeakPayload:
+      properties:
+        text:
+          type: string
+          title: Text
+        residentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Residentid
+        voiceId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Voiceid
+      type: object
+      required:
+      - text
+      title: HeyGenSpeakPayload
+    LiteCreatePayload:
+      properties:
+        avatar_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Avatar Id
+        voice_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Voice Id
+        context_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Context Id
+        language:
+          type: string
+          title: Language
+          default: en
+        video_encoding:
+          type: string
+          enum:
+          - VP8
+          - H264
+          title: Video Encoding
+          default: VP8
+        video_quality:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - very_high
+          title: Video Quality
+          default: high
+        is_sandbox:
+          type: boolean
+          title: Is Sandbox
+          default: false
+        livekit_config:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Livekit Config
+      type: object
+      title: LiteCreatePayload
+    LiteCreateResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+        session_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Token
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        raw:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Raw
+      type: object
+      required:
+      - ok
+      title: LiteCreateResponse
+    LiteSessionControlPayload:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+      type: object
+      required:
+      - session_id
+      title: LiteSessionControlPayload
+    LiteSpeakTextPayload:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        text:
+          type: string
+          title: Text
+        voice_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Voice Id
+        model_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model Id
+        interrupt_before_speak:
+          type: boolean
+          title: Interrupt Before Speak
+          default: true
+      type: object
+      required:
+      - session_id
+      - text
+      title: LiteSpeakTextPayload
+    LiteSpeakTonePayload:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        duration_seconds:
+          type: number
+          title: Duration Seconds
+          default: 1.0
+        frequency_hz:
+          type: number
+          title: Frequency Hz
+          default: 440.0
+      type: object
+      required:
+      - session_id
+      title: LiteSpeakTonePayload
+    LiteStartPayload:
+      properties:
+        session_token:
+          type: string
+          title: Session Token
+      type: object
+      required:
+      - session_token
+      title: LiteStartPayload
+    LiteStartResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+        session_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Token
+        livekit_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekit Url
+        livekit_client_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekit Client Token
+        livekit_agent_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekit Agent Token
+        ws_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ws Url
+        max_session_duration:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Session Duration
+        agent_ws_registered:
+          type: boolean
+          title: Agent Ws Registered
+          default: false
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        raw:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Raw
+      type: object
+      required:
+      - ok
+      title: LiteStartResponse
+    LiteStopPayload:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        session_token:
+          type: string
+          title: Session Token
+      type: object
+      required:
+      - session_id
+      - session_token
+      title: LiteStopPayload
+    LiteStopResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        raw:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Raw
+      type: object
+      required:
+      - ok
+      title: LiteStopResponse
+    LiveAgentBootstrapResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+        residentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Residentid
+        sessionId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionid
+        sessionAccessToken:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionaccesstoken
+        livekitUrl:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekiturl
+        livekitClientToken:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekitclienttoken
+        livekitAgentToken:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekitagenttoken
+        maxSessionDuration:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Maxsessionduration
+        wsUrl:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Wsurl
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        raw:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Raw
+      type: object
+      required:
+      - ok
+      title: LiveAgentBootstrapResponse
+    LiveAgentSessionEventPayload:
+      properties:
+        sessionToken:
+          type: string
+          title: Sessiontoken
+        sessionId:
+          type: string
+          title: Sessionid
+        text:
+          type: string
+          title: Text
+      type: object
+      required:
+      - sessionToken
+      - sessionId
+      - text
+      title: LiveAgentSessionEventPayload
+    LiveAgentSessionEventResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        raw:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Raw
+      type: object
+      required:
+      - ok
+      title: LiveAgentSessionEventResponse
+    LiveAgentSessionTokenPayload:
+      properties:
+        residentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Residentid
+        avatarId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Avatarid
+        mode:
+          type: string
+          const: FULL
+          title: Mode
+          default: FULL
+        interactivityType:
+          type: string
+          const: PUSH_TO_TALK
+          title: Interactivitytype
+          default: PUSH_TO_TALK
+        language:
+          type: string
+          title: Language
+          default: en
+      type: object
+      title: LiveAgentSessionTokenPayload
+    LiveAgentSessionTokenResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+        mode:
+          type: string
+          title: Mode
+        residentId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Residentid
+        sessionAccessToken:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionaccesstoken
+        sessionId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionid
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        raw:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Raw
+      type: object
+      required:
+      - ok
+      - mode
+      title: LiveAgentSessionTokenResponse
+    LiveAgentStartPayload:
+      properties:
+        sessionToken:
+          type: string
+          title: Sessiontoken
+        sessionId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionid
+      type: object
+      required:
+      - sessionToken
+      title: LiveAgentStartPayload
+    LiveAgentStartResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+        sessionId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionid
+        livekitUrl:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekiturl
+        livekitClientToken:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekitclienttoken
+        livekitAgentToken:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Livekitagenttoken
+        maxSessionDuration:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Maxsessionduration
+        wsUrl:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Wsurl
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        raw:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Raw
+      type: object
+      required:
+      - ok
+      title: LiveAgentStartResponse
+    LiveAgentStopPayload:
+      properties:
+        sessionId:
+          type: string
+          title: Sessionid
+      type: object
+      required:
+      - sessionId
+      title: LiveAgentStopPayload
+    LiveAvatarSessionPayload:
+      properties:
+        avatar_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Avatar Id
+        voice_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Voice Id
+        context_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Context Id
+        language:
+          type: string
+          title: Language
+          default: en
+        video_encoding:
+          type: string
+          enum:
+          - VP8
+          - H264
+          title: Video Encoding
+          default: VP8
+        video_quality:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - very_high
+          title: Video Quality
+          default: high
+        is_sandbox:
+          type: boolean
+          title: Is Sandbox
+          default: false
+      type: object
+      title: LiveAvatarSessionPayload
+    OpenEvidencePayload:
+      properties:
+        query:
+          type: string
+          title: Query
+        metadata:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Metadata
+      type: object
+      required:
+      - query
+      title: OpenEvidencePayload
+    ResidentCreate:
+      properties:
+        residentId:
+          type: string
+          title: Residentid
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+      type: object
+      required:
+      - residentId
+      title: ResidentCreate
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    VisionPacket:
+      properties:
+        residentId:
+          type: string
+          title: Residentid
+        cameraId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cameraid
+        ts:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Ts
+        fallSuspected:
+          type: boolean
+          title: Fallsuspected
+          default: false
+        fallCount:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Fallcount
+        totalTimeOnGroundSeconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Totaltimeongroundseconds
+        postureState:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Posturestate
+        stepCount:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Stepcount
+        cadenceSpm:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Cadencespm
+        avgCadenceSpm:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Avgcadencespm
+        stepTimeCv:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Steptimecv
+        stepTimeMean:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Steptimemean
+        activityState:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Activitystate
+        asymmetryIndex:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Asymmetryindex
+        fallRiskLevel:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fallrisklevel
+        fallRiskScore:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Fallriskscore
+        fogStatus:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fogstatus
+        fogEpisodes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Fogepisodes
+        fogDurationSeconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Fogdurationseconds
+        stepVar:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Stepvar
+        personDetected:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Persondetected
+        confidence:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Confidence
+        sourceFps:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Sourcefps
+        inferenceMs:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Inferencems
+        frameId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Frameid
+      type: object
+      required:
+      - residentId
+      title: VisionPacket
+    WalkerPacket:
+      properties:
+        residentId:
+          type: string
+          title: Residentid
+        deviceId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Deviceid
+        ts:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Ts
+        fsrLeft:
+          type: integer
+          title: Fsrleft
+        fsrRight:
+          type: integer
+          title: Fsrright
+        tiltDeg:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Tiltdeg
+        steps:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Steps
+      type: object
+      required:
+      - residentId
+      - fsrLeft
+      - fsrRight
+      title: WalkerPacket
+    ZoomInvitePayload:
+      properties:
+        contactLabel:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Contactlabel
+        phrase:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Phrase
+      type: object
+      title: ZoomInvitePayload
+servers:
+- url: http://localhost:8000
+  description: Local development
+- url: https://smartwalker-back.onrender.com
+  description: Deployed backend
+x-websockets:
+  description: Websocket endpoints and message formats used by the frontend.
+  channels:
+    /ws:
+      summary: Legacy merged-state stream for all residents.
+      query: {}
+      clientToServer:
+        type: text
+        schema:
+          type: string
+          description: Keepalive/client text payload. Content is ignored by server
+            loop.
+      serverToClient:
+      - type: snapshot
+        schema:
+          type: object
+          properties:
+            type:
+              const: snapshot
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/MergedStateResponse'
+          required:
+          - type
+          - data
+      - type: merged_update
+        schema:
+          type: object
+          properties:
+            type:
+              const: merged_update
+            data:
+              $ref: '#/components/schemas/MergedStateResponse'
+          required:
+          - type
+          - data
+    /ws/live:
+      summary: Merged-state stream filtered by resident.
+      query:
+        residentId:
+          type: string
+          required: false
+          description: Optional resident filter.
+      clientToServer:
+        type: text
+        schema:
+          type: string
+          description: Keepalive/client text payload. Content is ignored by server
+            loop.
+      serverToClient:
+      - type: snapshot
+        schema:
+          type: object
+          properties:
+            type:
+              const: snapshot
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/MergedStateResponse'
+          required:
+          - type
+          - data
+      - type: merged_update
+        schema:
+          type: object
+          properties:
+            type:
+              const: merged_update
+            data:
+              $ref: '#/components/schemas/MergedStateResponse'
+          required:
+          - type
+          - data
+    /ws/voice-agent:
+      summary: 'Voice pipeline websocket: STT -> SQL -> answer -> streaming TTS audio.'
+      query:
+        residentId:
+          type: string
+          required: false
+          description: Resident id for DB query scope; defaults to r1.
+      clientToServer:
+        oneOf:
+        - type: object
+          properties:
+            type:
+              const: session.start
+            resident_id:
+              type: string
+            text:
+              type: string
+          required:
+          - type
+        - type: object
+          properties:
+            type:
+              const: user_audio
+            resident_id:
+              type: string
+            mime_type:
+              type: string
+              example: audio/webm
+            audio_base64:
+              type: string
+              description: Base64 encoded user audio blob.
+          required:
+          - type
+          - audio_base64
+        - type: object
+          properties:
+            type:
+              const: user_message
+            resident_id:
+              type: string
+            text:
+              type: string
+          required:
+          - type
+          - text
+        - type: object
+          properties:
+            type:
+              const: ping
+            event_id:
+              type: string
+          required:
+          - type
+      serverToClient:
+        oneOf:
+        - type: object
+          properties:
+            type:
+              const: ready
+            resident_id:
+              type: string
+          required:
+          - type
+          - resident_id
+        - type: object
+          properties:
+            type:
+              const: session.started
+            resident_id:
+              type: string
+          required:
+          - type
+          - resident_id
+        - type: object
+          properties:
+            type:
+              const: user_transcript
+            user_transcript:
+              type: string
+          required:
+          - type
+          - user_transcript
+        - type: object
+          properties:
+            type:
+              const: sql_generated
+            sql:
+              type: string
+          required:
+          - type
+          - sql
+        - type: object
+          properties:
+            type:
+              const: sql_result
+            row_count:
+              type: integer
+            rows_preview:
+              type: array
+              items:
+                type: object
+          required:
+          - type
+          - row_count
+          - rows_preview
+        - type: object
+          properties:
+            type:
+              const: agent_response
+            text:
+              type: string
+          required:
+          - type
+          - text
+        - type: object
+          properties:
+            type:
+              const: audio_start
+            sample_rate_hz:
+              type: integer
+              example: 24000
+          required:
+          - type
+          - sample_rate_hz
+        - type: object
+          properties:
+            type:
+              const: audio_chunk
+            audio_base64:
+              type: string
+            sample_rate_hz:
+              type: integer
+              example: 24000
+          required:
+          - type
+          - audio_base64
+          - sample_rate_hz
+        - type: object
+          properties:
+            type:
+              const: audio_end
+          required:
+          - type
+        - type: object
+          properties:
+            type:
+              const: debug
+            stage:
+              type: string
+              enum:
+              - stt
+              - sql
+              - answer
+              - tts
+              - turn
+              - error
+            message:
+              type: string
+            meta:
+              type: object
+          required:
+          - type
+          - stage
+          - message
+        - type: object
+          properties:
+            type:
+              const: pong
+            event_id:
+              type: string
+          required:
+          - type
+        - type: object
+          properties:
+            type:
+              const: error
+            error:
+              type: string
+          required:
+          - type
+          - error

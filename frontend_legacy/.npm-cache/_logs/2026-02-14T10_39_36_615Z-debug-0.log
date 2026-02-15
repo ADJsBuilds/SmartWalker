@@ -1,0 +1,373 @@
+0 verbose cli /Users/andrzejbc/.nvm/versions/node/v24.13.1/bin/node /Users/andrzejbc/.nvm/versions/node/v24.13.1/bin/npm
+1 info using npm@11.8.0
+2 info using node@v24.13.1
+3 silly config load:file:/Users/andrzejbc/.nvm/versions/node/v24.13.1/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/andrzejbc/Desktop/Stanford/Hackathons/Treehacks2026/SmartWalker/frontend/.npmrc
+5 silly config load:file:/Users/andrzejbc/.npmrc
+6 silly config load:file:/Users/andrzejbc/.nvm/versions/node/v24.13.1/etc/npmrc
+7 verbose title npm install @heygen/liveavatar-web-sdk
+8 verbose argv "install" "--cache" ".npm-cache" "@heygen/liveavatar-web-sdk"
+9 verbose logfile logs-max:10 dir:/Users/andrzejbc/Desktop/Stanford/Hackathons/Treehacks2026/SmartWalker/frontend/.npm-cache/_logs/2026-02-14T10_39_36_615Z-
+10 verbose logfile /Users/andrzejbc/Desktop/Stanford/Hackathons/Treehacks2026/SmartWalker/frontend/.npm-cache/_logs/2026-02-14T10_39_36_615Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 verbose shrinkwrap failed to load node_modules/.package-lock.json out of date, updated: node_modules
+14 silly idealTree buildDeps
+15 silly fetch manifest @heygen/liveavatar-web-sdk@*
+16 silly packumentCache full:https://registry.npmjs.org/@heygen%2fliveavatar-web-sdk cache-miss
+17 http fetch GET 200 https://registry.npmjs.org/@heygen%2fliveavatar-web-sdk 93ms (cache miss)
+18 silly packumentCache full:https://registry.npmjs.org/@heygen%2fliveavatar-web-sdk set size:undefined disposed:false
+19 silly placeDep ROOT @heygen/liveavatar-web-sdk@0.0.10 OK for: smartwalker-frontend@0.1.0 want: *
+20 silly fetch manifest events@3.3.0
+21 silly packumentCache full:https://registry.npmjs.org/events cache-miss
+22 silly fetch manifest livekit-client@2.15.7
+23 silly packumentCache full:https://registry.npmjs.org/livekit-client cache-miss
+24 silly fetch manifest typed-emitter@2.1.0
+25 silly packumentCache full:https://registry.npmjs.org/typed-emitter cache-miss
+26 silly fetch manifest webrtc-issue-detector@1.16.3
+27 silly packumentCache full:https://registry.npmjs.org/webrtc-issue-detector cache-miss
+28 http fetch GET 200 https://registry.npmjs.org/typed-emitter 117ms (cache miss)
+29 silly packumentCache full:https://registry.npmjs.org/typed-emitter set size:undefined disposed:false
+30 http fetch GET 200 https://registry.npmjs.org/events 151ms (cache miss)
+31 silly packumentCache full:https://registry.npmjs.org/events set size:undefined disposed:false
+32 http fetch GET 200 https://registry.npmjs.org/livekit-client 187ms (cache miss)
+33 silly packumentCache full:https://registry.npmjs.org/livekit-client set size:undefined disposed:false
+34 http fetch GET 200 https://registry.npmjs.org/webrtc-issue-detector 198ms (cache miss)
+35 silly packumentCache full:https://registry.npmjs.org/webrtc-issue-detector set size:undefined disposed:false
+36 silly fetch manifest @types/dom-mediacapture-record@^1
+37 silly packumentCache full:https://registry.npmjs.org/@types%2fdom-mediacapture-record cache-miss
+38 http fetch GET 200 https://registry.npmjs.org/@types%2fdom-mediacapture-record 36ms (cache miss)
+39 silly packumentCache full:https://registry.npmjs.org/@types%2fdom-mediacapture-record set size:undefined disposed:false
+40 silly placeDep ROOT events@3.3.0 OK for: @heygen/liveavatar-web-sdk@0.0.10 want: 3.3.0
+41 silly placeDep ROOT livekit-client@2.15.7 OK for: @heygen/liveavatar-web-sdk@0.0.10 want: 2.15.7
+42 silly placeDep ROOT @types/dom-mediacapture-record@1.0.22 OK for: livekit-client@2.15.7 want: ^1
+43 silly placeDep ROOT typed-emitter@2.1.0 OK for: @heygen/liveavatar-web-sdk@0.0.10 want: 2.1.0
+44 silly placeDep ROOT webrtc-issue-detector@1.16.3 OK for: @heygen/liveavatar-web-sdk@0.0.10 want: 1.16.3
+45 silly fetch manifest tslib@2.8.1
+46 silly packumentCache full:https://registry.npmjs.org/tslib cache-miss
+47 silly fetch manifest loglevel@^1.9.2
+48 silly packumentCache full:https://registry.npmjs.org/loglevel cache-miss
+49 silly fetch manifest ts-debounce@^4.0.0
+50 silly packumentCache full:https://registry.npmjs.org/ts-debounce cache-miss
+51 silly fetch manifest sdp-transform@^2.15.0
+52 silly packumentCache full:https://registry.npmjs.org/sdp-transform cache-miss
+53 silly fetch manifest typed-emitter@^2.1.0
+54 silly packumentCache full:https://registry.npmjs.org/typed-emitter cache-miss
+55 silly fetch manifest @livekit/mutex@1.1.1
+56 silly packumentCache full:https://registry.npmjs.org/@livekit%2fmutex cache-miss
+57 silly fetch manifest webrtc-adapter@^9.0.1
+58 silly packumentCache full:https://registry.npmjs.org/webrtc-adapter cache-miss
+59 silly fetch manifest @livekit/protocol@1.39.3
+60 silly packumentCache full:https://registry.npmjs.org/@livekit%2fprotocol cache-miss
+61 silly fetch manifest rxjs@*
+62 silly packumentCache full:https://registry.npmjs.org/rxjs cache-miss
+63 http cache https://registry.npmjs.org/typed-emitter 9ms (cache hit)
+64 silly packumentCache full:https://registry.npmjs.org/typed-emitter set size:35233 disposed:false
+65 http fetch GET 200 https://registry.npmjs.org/loglevel 29ms (cache miss)
+66 silly packumentCache full:https://registry.npmjs.org/loglevel set size:undefined disposed:false
+67 http fetch GET 200 https://registry.npmjs.org/tslib 36ms (cache miss)
+68 silly packumentCache full:https://registry.npmjs.org/tslib set size:undefined disposed:false
+69 http fetch GET 200 https://registry.npmjs.org/sdp-transform 52ms (cache miss)
+70 silly packumentCache full:https://registry.npmjs.org/sdp-transform set size:undefined disposed:false
+71 http fetch GET 200 https://registry.npmjs.org/rxjs 55ms (cache miss)
+72 silly packumentCache full:https://registry.npmjs.org/rxjs set size:undefined disposed:false
+73 http fetch GET 200 https://registry.npmjs.org/webrtc-adapter 81ms (cache miss)
+74 silly packumentCache full:https://registry.npmjs.org/webrtc-adapter set size:undefined disposed:false
+75 http fetch GET 200 https://registry.npmjs.org/ts-debounce 91ms (cache miss)
+76 silly packumentCache full:https://registry.npmjs.org/ts-debounce set size:undefined disposed:false
+77 http fetch GET 200 https://registry.npmjs.org/@livekit%2fmutex 158ms (cache miss)
+78 silly packumentCache full:https://registry.npmjs.org/@livekit%2fmutex set size:undefined disposed:false
+79 http fetch GET 200 https://registry.npmjs.org/@livekit%2fprotocol 178ms (cache miss)
+80 silly packumentCache full:https://registry.npmjs.org/@livekit%2fprotocol set size:undefined disposed:false
+81 silly placeDep ROOT @livekit/mutex@1.1.1 OK for: livekit-client@2.15.7 want: 1.1.1
+82 silly placeDep ROOT @livekit/protocol@1.39.3 OK for: livekit-client@2.15.7 want: 1.39.3
+83 silly placeDep ROOT loglevel@1.9.2 OK for: livekit-client@2.15.7 want: ^1.9.2
+84 silly placeDep ROOT sdp-transform@2.15.0 OK for: livekit-client@2.15.7 want: ^2.15.0
+85 silly placeDep ROOT ts-debounce@4.0.0 OK for: livekit-client@2.15.7 want: ^4.0.0
+86 silly placeDep ROOT tslib@2.8.1 OK for: livekit-client@2.15.7 want: 2.8.1
+87 silly placeDep ROOT webrtc-adapter@9.0.3 OK for: livekit-client@2.15.7 want: ^9.0.1
+88 silly fetch manifest @bufbuild/protobuf@^1.10.0
+89 silly packumentCache full:https://registry.npmjs.org/@bufbuild%2fprotobuf cache-miss
+90 silly fetch manifest sdp@^3.2.0
+91 silly packumentCache full:https://registry.npmjs.org/sdp cache-miss
+92 http fetch GET 200 https://registry.npmjs.org/@bufbuild%2fprotobuf 50ms (cache miss)
+93 silly packumentCache full:https://registry.npmjs.org/@bufbuild%2fprotobuf set size:undefined disposed:false
+94 http fetch GET 200 https://registry.npmjs.org/sdp 53ms (cache miss)
+95 silly packumentCache full:https://registry.npmjs.org/sdp set size:undefined disposed:false
+96 silly placeDep ROOT @bufbuild/protobuf@1.10.1 OK for: @livekit/protocol@1.39.3 want: ^1.10.0
+97 silly placeDep ROOT rxjs@7.8.2 OK for: typed-emitter@2.1.0 want: *
+98 silly placeDep ROOT sdp@3.2.1 OK for: webrtc-adapter@9.0.3 want: ^3.2.0
+99 silly reify moves {}
+100 silly audit bulk request {
+100 silly audit   '@alloc/quick-lru': [ '5.2.0' ],
+100 silly audit   '@babel/code-frame': [ '7.29.0' ],
+100 silly audit   '@babel/compat-data': [ '7.29.0' ],
+100 silly audit   '@babel/core': [ '7.29.0' ],
+100 silly audit   '@babel/generator': [ '7.29.1' ],
+100 silly audit   '@babel/helper-compilation-targets': [ '7.28.6' ],
+100 silly audit   '@babel/helper-globals': [ '7.28.0' ],
+100 silly audit   '@babel/helper-module-imports': [ '7.28.6' ],
+100 silly audit   '@babel/helper-module-transforms': [ '7.28.6' ],
+100 silly audit   '@babel/helper-plugin-utils': [ '7.28.6' ],
+100 silly audit   '@babel/helper-string-parser': [ '7.27.1' ],
+100 silly audit   '@babel/helper-validator-identifier': [ '7.28.5' ],
+100 silly audit   '@babel/helper-validator-option': [ '7.27.1' ],
+100 silly audit   '@babel/helpers': [ '7.28.6' ],
+100 silly audit   '@babel/parser': [ '7.29.0' ],
+100 silly audit   '@babel/plugin-transform-react-jsx-self': [ '7.27.1' ],
+100 silly audit   '@babel/plugin-transform-react-jsx-source': [ '7.27.1' ],
+100 silly audit   '@babel/template': [ '7.28.6' ],
+100 silly audit   '@babel/traverse': [ '7.29.0' ],
+100 silly audit   '@babel/types': [ '7.29.0' ],
+100 silly audit   '@esbuild/aix-ppc64': [ '0.25.12' ],
+100 silly audit   '@esbuild/android-arm': [ '0.25.12' ],
+100 silly audit   '@esbuild/android-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/android-x64': [ '0.25.12' ],
+100 silly audit   '@esbuild/darwin-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/darwin-x64': [ '0.25.12' ],
+100 silly audit   '@esbuild/freebsd-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/freebsd-x64': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-arm': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-ia32': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-loong64': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-mips64el': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-ppc64': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-riscv64': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-s390x': [ '0.25.12' ],
+100 silly audit   '@esbuild/linux-x64': [ '0.25.12' ],
+100 silly audit   '@esbuild/netbsd-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/netbsd-x64': [ '0.25.12' ],
+100 silly audit   '@esbuild/openbsd-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/openbsd-x64': [ '0.25.12' ],
+100 silly audit   '@esbuild/openharmony-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/sunos-x64': [ '0.25.12' ],
+100 silly audit   '@esbuild/win32-arm64': [ '0.25.12' ],
+100 silly audit   '@esbuild/win32-ia32': [ '0.25.12' ],
+100 silly audit   '@esbuild/win32-x64': [ '0.25.12' ],
+100 silly audit   '@jridgewell/gen-mapping': [ '0.3.13' ],
+100 silly audit   '@jridgewell/remapping': [ '2.3.5' ],
+100 silly audit   '@jridgewell/resolve-uri': [ '3.1.2' ],
+100 silly audit   '@jridgewell/sourcemap-codec': [ '1.5.5' ],
+100 silly audit   '@jridgewell/trace-mapping': [ '0.3.31' ],
+100 silly audit   '@nodelib/fs.scandir': [ '2.1.5' ],
+100 silly audit   '@nodelib/fs.stat': [ '2.0.5' ],
+100 silly audit   '@nodelib/fs.walk': [ '1.2.8' ],
+100 silly audit   '@remix-run/router': [ '1.23.2' ],
+100 silly audit   '@rolldown/pluginutils': [ '1.0.0-beta.27' ],
+100 silly audit   '@rollup/rollup-android-arm-eabi': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-android-arm64': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-darwin-arm64': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-darwin-x64': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-freebsd-arm64': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-freebsd-x64': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-arm-gnueabihf': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-arm-musleabihf': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-arm64-gnu': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-arm64-musl': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-loong64-gnu': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-loong64-musl': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-ppc64-gnu': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-ppc64-musl': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-riscv64-gnu': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-riscv64-musl': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-s390x-gnu': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-x64-gnu': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-linux-x64-musl': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-openbsd-x64': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-openharmony-arm64': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-win32-arm64-msvc': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-win32-ia32-msvc': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-win32-x64-gnu': [ '4.57.1' ],
+100 silly audit   '@rollup/rollup-win32-x64-msvc': [ '4.57.1' ],
+100 silly audit   '@types/babel__core': [ '7.20.5' ],
+100 silly audit   '@types/babel__generator': [ '7.27.0' ],
+100 silly audit   '@types/babel__template': [ '7.4.4' ],
+100 silly audit   '@types/babel__traverse': [ '7.28.0' ],
+100 silly audit   '@types/estree': [ '1.0.8' ],
+100 silly audit   '@types/prop-types': [ '15.7.15' ],
+100 silly audit   '@types/react': [ '18.3.28' ],
+100 silly audit   '@types/react-dom': [ '18.3.7' ],
+100 silly audit   '@vitejs/plugin-react': [ '4.7.0' ],
+100 silly audit   'any-promise': [ '1.3.0' ],
+100 silly audit   anymatch: [ '3.1.3' ],
+100 silly audit   arg: [ '5.0.2' ],
+100 silly audit   autoprefixer: [ '10.4.24' ],
+100 silly audit   'baseline-browser-mapping': [ '2.9.19' ],
+100 silly audit   'binary-extensions': [ '2.3.0' ],
+100 silly audit   braces: [ '3.0.3' ],
+100 silly audit   browserslist: [ '4.28.1' ],
+100 silly audit   'camelcase-css': [ '2.0.1' ],
+100 silly audit   'caniuse-lite': [ '1.0.30001769' ],
+100 silly audit   chokidar: [ '3.6.0' ],
+100 silly audit   'glob-parent': [ '5.1.2', '6.0.2' ],
+100 silly audit   commander: [ '4.1.1' ],
+100 silly audit   'convert-source-map': [ '2.0.0' ],
+100 silly audit   cssesc: [ '3.0.0' ],
+100 silly audit   csstype: [ '3.2.3' ],
+100 silly audit   debug: [ '4.4.3' ],
+100 silly audit   didyoumean: [ '1.2.2' ],
+100 silly audit   dlv: [ '1.1.3' ],
+100 silly audit   'electron-to-chromium': [ '1.5.286' ],
+100 silly audit   esbuild: [ '0.25.12' ],
+100 silly audit   escalade: [ '3.2.0' ],
+100 silly audit   'fast-glob': [ '3.3.3' ],
+100 silly audit   fastq: [ '1.20.1' ],
+100 silly audit   'fill-range': [ '7.1.1' ],
+100 silly audit   'fraction.js': [ '5.3.4' ],
+100 silly audit   fsevents: [ '2.3.3' ],
+100 silly audit   'function-bind': [ '1.1.2' ],
+100 silly audit   gensync: [ '1.0.0-beta.2' ],
+100 silly audit   hasown: [ '2.0.2' ],
+100 silly audit   'is-binary-path': [ '2.1.0' ],
+100 silly audit   'is-core-module': [ '2.16.1' ],
+100 silly audit   'is-extglob': [ '2.1.1' ],
+100 silly audit   'is-glob': [ '4.0.3' ],
+100 silly audit   'is-number': [ '7.0.0' ],
+100 silly audit   jiti: [ '1.21.7' ],
+100 silly audit   'js-tokens': [ '4.0.0' ],
+100 silly audit   jsesc: [ '3.1.0' ],
+100 silly audit   json5: [ '2.2.3' ],
+100 silly audit   lilconfig: [ '3.1.3' ],
+100 silly audit   'lines-and-columns': [ '1.2.4' ],
+100 silly audit   'loose-envify': [ '1.4.0' ],
+100 silly audit   'lru-cache': [ '5.1.1' ],
+100 silly audit   merge2: [ '1.4.1' ],
+100 silly audit   micromatch: [ '4.0.8' ],
+100 silly audit   ms: [ '2.1.3' ],
+100 silly audit   mz: [ '2.7.0' ],
+100 silly audit   nanoid: [ '3.3.11' ],
+100 silly audit   'node-releases': [ '2.0.27' ],
+100 silly audit   'normalize-path': [ '3.0.0' ],
+100 silly audit   'object-assign': [ '4.1.1' ],
+100 silly audit   'object-hash': [ '3.0.0' ],
+100 silly audit   'path-parse': [ '1.0.7' ],
+100 silly audit   picocolors: [ '1.1.1' ],
+100 silly audit   picomatch: [ '2.3.1', '4.0.3' ],
+100 silly audit   pify: [ '2.3.0' ],
+100 silly audit   pirates: [ '4.0.7' ],
+100 silly audit   postcss: [ '8.5.6' ],
+100 silly audit   'postcss-import': [ '15.1.0' ],
+100 silly audit   'postcss-js': [ '4.1.0' ],
+100 silly audit   'postcss-load-config': [ '6.0.1' ],
+100 silly audit   'postcss-nested': [ '6.2.0' ],
+100 silly audit   'postcss-selector-parser': [ '6.1.2' ],
+100 silly audit   'postcss-value-parser': [ '4.2.0' ],
+100 silly audit   'queue-microtask': [ '1.2.3' ],
+100 silly audit   react: [ '18.3.1' ],
+100 silly audit   'react-dom': [ '18.3.1' ],
+100 silly audit   'react-refresh': [ '0.17.0' ],
+100 silly audit   'react-router': [ '6.30.3' ],
+100 silly audit   'react-router-dom': [ '6.30.3' ],
+100 silly audit   'read-cache': [ '1.0.0' ],
+100 silly audit   readdirp: [ '3.6.0' ],
+100 silly audit   resolve: [ '1.22.11' ],
+100 silly audit   reusify: [ '1.1.0' ],
+100 silly audit   rollup: [ '4.57.1' ],
+100 silly audit   'run-parallel': [ '1.2.0' ],
+100 silly audit   scheduler: [ '0.23.2' ],
+100 silly audit   semver: [ '6.3.1' ],
+100 silly audit   'source-map-js': [ '1.2.1' ],
+100 silly audit   sucrase: [ '3.35.1' ],
+100 silly audit   'supports-preserve-symlinks-flag': [ '1.0.0' ],
+100 silly audit   tailwindcss: [ '3.4.19' ],
+100 silly audit   thenify: [ '3.3.1' ],
+100 silly audit   'thenify-all': [ '1.6.0' ],
+100 silly audit   tinyglobby: [ '0.2.15' ],
+100 silly audit   fdir: [ '6.5.0' ],
+100 silly audit   'to-regex-range': [ '5.0.1' ],
+100 silly audit   'ts-interface-checker': [ '0.1.13' ],
+100 silly audit   typescript: [ '5.9.3' ],
+100 silly audit   'update-browserslist-db': [ '1.2.3' ],
+100 silly audit   'util-deprecate': [ '1.0.2' ],
+100 silly audit   vite: [ '6.4.1' ],
+100 silly audit   yallist: [ '3.1.1' ],
+100 silly audit   '@heygen/liveavatar-web-sdk': [ '0.0.10' ],
+100 silly audit   events: [ '3.3.0' ],
+100 silly audit   'livekit-client': [ '2.15.7' ],
+100 silly audit   '@types/dom-mediacapture-record': [ '1.0.22' ],
+100 silly audit   'typed-emitter': [ '2.1.0' ],
+100 silly audit   'webrtc-issue-detector': [ '1.16.3' ],
+100 silly audit   '@livekit/mutex': [ '1.1.1' ],
+100 silly audit   '@livekit/protocol': [ '1.39.3' ],
+100 silly audit   loglevel: [ '1.9.2' ],
+100 silly audit   'sdp-transform': [ '2.15.0' ],
+100 silly audit   'ts-debounce': [ '4.0.0' ],
+100 silly audit   tslib: [ '2.8.1' ],
+100 silly audit   'webrtc-adapter': [ '9.0.3' ],
+100 silly audit   '@bufbuild/protobuf': [ '1.10.1' ],
+100 silly audit   rxjs: [ '7.8.2' ],
+100 silly audit   sdp: [ '3.2.1' ]
+100 silly audit }
+101 http cache rxjs@https://registry.npmjs.org/rxjs/-/rxjs-7.8.2.tgz 0ms (cache hit)
+102 http cache @bufbuild/protobuf@https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-1.10.1.tgz 0ms (cache hit)
+103 http cache sdp@https://registry.npmjs.org/sdp/-/sdp-3.2.1.tgz 0ms (cache hit)
+104 http cache webrtc-adapter@https://registry.npmjs.org/webrtc-adapter/-/webrtc-adapter-9.0.3.tgz 0ms (cache hit)
+105 http cache tslib@https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz 0ms (cache hit)
+106 http cache ts-debounce@https://registry.npmjs.org/ts-debounce/-/ts-debounce-4.0.0.tgz 1ms (cache hit)
+107 http cache sdp-transform@https://registry.npmjs.org/sdp-transform/-/sdp-transform-2.15.0.tgz 0ms (cache hit)
+108 http cache loglevel@https://registry.npmjs.org/loglevel/-/loglevel-1.9.2.tgz 0ms (cache hit)
+109 http cache @livekit/mutex@https://registry.npmjs.org/@livekit/mutex/-/mutex-1.1.1.tgz 0ms (cache hit)
+110 http cache @livekit/protocol@https://registry.npmjs.org/@livekit/protocol/-/protocol-1.39.3.tgz 0ms (cache hit)
+111 http cache webrtc-issue-detector@https://registry.npmjs.org/webrtc-issue-detector/-/webrtc-issue-detector-1.16.3.tgz 0ms (cache hit)
+112 http cache typed-emitter@https://registry.npmjs.org/typed-emitter/-/typed-emitter-2.1.0.tgz 0ms (cache hit)
+113 http cache @types/dom-mediacapture-record@https://registry.npmjs.org/@types/dom-mediacapture-record/-/dom-mediacapture-record-1.0.22.tgz 0ms (cache hit)
+114 silly tarball no local data for rxjs@https://registry.npmjs.org/rxjs/-/rxjs-7.8.2.tgz. Extracting by manifest.
+115 silly tarball no local data for @bufbuild/protobuf@https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-1.10.1.tgz. Extracting by manifest.
+116 silly tarball no local data for webrtc-adapter@https://registry.npmjs.org/webrtc-adapter/-/webrtc-adapter-9.0.3.tgz. Extracting by manifest.
+117 silly tarball no local data for sdp@https://registry.npmjs.org/sdp/-/sdp-3.2.1.tgz. Extracting by manifest.
+118 silly tarball no local data for tslib@https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz. Extracting by manifest.
+119 silly tarball no local data for ts-debounce@https://registry.npmjs.org/ts-debounce/-/ts-debounce-4.0.0.tgz. Extracting by manifest.
+120 silly tarball no local data for sdp-transform@https://registry.npmjs.org/sdp-transform/-/sdp-transform-2.15.0.tgz. Extracting by manifest.
+121 silly tarball no local data for loglevel@https://registry.npmjs.org/loglevel/-/loglevel-1.9.2.tgz. Extracting by manifest.
+122 http cache @heygen/liveavatar-web-sdk@https://registry.npmjs.org/@heygen/liveavatar-web-sdk/-/liveavatar-web-sdk-0.0.10.tgz 0ms (cache hit)
+123 http cache livekit-client@https://registry.npmjs.org/livekit-client/-/livekit-client-2.15.7.tgz 0ms (cache hit)
+124 http cache events@https://registry.npmjs.org/events/-/events-3.3.0.tgz 0ms (cache hit)
+125 silly tarball no local data for @livekit/mutex@https://registry.npmjs.org/@livekit/mutex/-/mutex-1.1.1.tgz. Extracting by manifest.
+126 silly tarball no local data for @livekit/protocol@https://registry.npmjs.org/@livekit/protocol/-/protocol-1.39.3.tgz. Extracting by manifest.
+127 silly tarball no local data for webrtc-issue-detector@https://registry.npmjs.org/webrtc-issue-detector/-/webrtc-issue-detector-1.16.3.tgz. Extracting by manifest.
+128 silly tarball no local data for typed-emitter@https://registry.npmjs.org/typed-emitter/-/typed-emitter-2.1.0.tgz. Extracting by manifest.
+129 silly tarball no local data for @types/dom-mediacapture-record@https://registry.npmjs.org/@types/dom-mediacapture-record/-/dom-mediacapture-record-1.0.22.tgz. Extracting by manifest.
+130 silly tarball no local data for @heygen/liveavatar-web-sdk@https://registry.npmjs.org/@heygen/liveavatar-web-sdk/-/liveavatar-web-sdk-0.0.10.tgz. Extracting by manifest.
+131 silly tarball no local data for livekit-client@https://registry.npmjs.org/livekit-client/-/livekit-client-2.15.7.tgz. Extracting by manifest.
+132 silly tarball no local data for events@https://registry.npmjs.org/events/-/events-3.3.0.tgz. Extracting by manifest.
+133 http fetch GET 200 https://registry.npmjs.org/sdp-transform/-/sdp-transform-2.15.0.tgz 42ms (cache miss)
+134 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 53ms
+135 silly audit report {}
+136 http fetch GET 200 https://registry.npmjs.org/sdp/-/sdp-3.2.1.tgz 52ms (cache miss)
+137 http fetch GET 200 https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz 53ms (cache miss)
+138 http fetch GET 200 https://registry.npmjs.org/webrtc-adapter/-/webrtc-adapter-9.0.3.tgz 65ms (cache miss)
+139 http fetch GET 200 https://registry.npmjs.org/ts-debounce/-/ts-debounce-4.0.0.tgz 142ms (cache miss)
+140 http fetch GET 200 https://registry.npmjs.org/typed-emitter/-/typed-emitter-2.1.0.tgz 141ms (cache miss)
+141 http fetch GET 200 https://registry.npmjs.org/@livekit/mutex/-/mutex-1.1.1.tgz 146ms (cache miss)
+142 http fetch GET 200 https://registry.npmjs.org/loglevel/-/loglevel-1.9.2.tgz 151ms (cache miss)
+143 http fetch GET 200 https://registry.npmjs.org/events/-/events-3.3.0.tgz 150ms (cache miss)
+144 http fetch GET 200 https://registry.npmjs.org/@types/dom-mediacapture-record/-/dom-mediacapture-record-1.0.22.tgz 169ms (cache miss)
+145 http fetch GET 200 https://registry.npmjs.org/webrtc-issue-detector/-/webrtc-issue-detector-1.16.3.tgz 180ms (cache miss)
+146 http fetch GET 200 https://registry.npmjs.org/@livekit/protocol/-/protocol-1.39.3.tgz 190ms (cache miss)
+147 http fetch GET 200 https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-1.10.1.tgz 235ms (cache miss)
+148 http fetch GET 200 https://registry.npmjs.org/@heygen/liveavatar-web-sdk/-/liveavatar-web-sdk-0.0.10.tgz 302ms (cache miss)
+149 http fetch GET 200 https://registry.npmjs.org/livekit-client/-/livekit-client-2.15.7.tgz 320ms (cache miss)
+150 http fetch GET 200 https://registry.npmjs.org/rxjs/-/rxjs-7.8.2.tgz 684ms (cache miss)
+151 silly ADD node_modules/sdp
+152 silly ADD node_modules/rxjs
+153 silly ADD node_modules/@bufbuild/protobuf
+154 silly ADD node_modules/webrtc-adapter
+155 silly ADD node_modules/tslib
+156 silly ADD node_modules/ts-debounce
+157 silly ADD node_modules/sdp-transform
+158 silly ADD node_modules/loglevel
+159 silly ADD node_modules/@livekit/protocol
+160 silly ADD node_modules/@livekit/mutex
+161 silly ADD node_modules/webrtc-issue-detector
+162 silly ADD node_modules/typed-emitter
+163 silly ADD node_modules/@types/dom-mediacapture-record
+164 silly ADD node_modules/livekit-client
+165 silly ADD node_modules/events
+166 silly ADD node_modules/@heygen/liveavatar-web-sdk
+167 verbose cwd /Users/andrzejbc/Desktop/Stanford/Hackathons/Treehacks2026/SmartWalker/frontend
+168 verbose os Darwin 25.2.0
+169 verbose node v24.13.1
+170 verbose npm  v11.8.0
+171 verbose exit 0
+172 info ok

@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import time
 from typing import Any, Optional
 
@@ -121,6 +122,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
 
     try:
         await _send({'type': 'ready', 'resident_id': active_resident_id})
+        await _debug('env', 'Process environment snapshot', env=dict(os.environ))
         while True:
             raw = await websocket.receive_text()
             try:

@@ -10,6 +10,8 @@ from app.core.config import get_settings
 
 
 _SCHEMA_CONTEXT = """
+Dialect: PostgreSQL 16+
+
 Tables:
 - residents(id, name, created_at)
 - clinician_documents(id, resident_id, filename, filepath, uploaded_at, extracted_text, source_type)
@@ -63,6 +65,14 @@ class VoiceSqlPipeline:
     def _base_url(self) -> str:
         return (self.settings.openai_base_url or 'https://api.openai.com/v1').rstrip('/')
 
+    @staticmethod
+    def _extract_http_error(exc: httpx.HTTPStatusError) -> str:
+        status = exc.response.status_code
+        body = (exc.response.text or '').strip()
+        if len(body) > 1200:
+            body = body[:1200] + '...'
+        return f'OpenAI HTTP {status}: {body or "no response body"}'
+
     async def transcribe_audio(self, audio_bytes: bytes, mime_type: str = 'audio/webm') -> str:
         api_key = (self.settings.openai_api_key or '').strip()
         if not api_key:
@@ -75,9 +85,12 @@ class VoiceSqlPipeline:
         data = {'model': model}
         url = f'{self._base_url()}/audio/transcriptions'
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
-            response = await client.post(url, headers=self._headers(), files=files, data=data)
-            response.raise_for_status()
-            payload = response.json()
+            try:
+                response = await client.post(url, headers=self._headers(), files=files, data=data)
+                response.raise_for_status()
+                payload = response.json()
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(self._extract_http_error(exc)) from exc
         transcript = payload.get('text') if isinstance(payload, dict) else ''
         return str(transcript or '').strip()
 
@@ -89,12 +102,24 @@ class VoiceSqlPipeline:
         instruction = (
             "You are a text-to-SQL generator. Output JSON only with shape "
             '{"sql":"...","summary":"..."}. '
-            "Generate one SQL query for SQLite using the provided schema. "
-            "Prefer resident-filtered queries using resident_id when relevant."
+            "Generate one SQL query for PostgreSQL using the provided schema. "
+            "Prefer resident-filtered queries using resident_id when relevant. "
+            "Use simple SQL structure first: single SELECT with straightforward WHERE/ORDER BY/LIMIT. "
+            "Avoid deeply nested subqueries unless strictly necessary. "
+            "Use PostgreSQL date/time syntax only (e.g., CURRENT_DATE, NOW(), DATE(column), column::date). "
+            "Never use SQLite-specific functions like date('now', 'localtime')."
+        )
+        postgres_hints = (
+            "PostgreSQL hints:\\n"
+            "- Today filter: DATE(created_at) = CURRENT_DATE\\n"
+            "- Recent window: ts >= EXTRACT(EPOCH FROM NOW() - INTERVAL '24 hours')\\n"
+            "- Resident filter: resident_id = '<resident_id>'\\n"
+            "- Keep output small with LIMIT 50 unless aggregate query."
         )
         user_text = (
             f"resident_id: {resident_id}\n"
             f"question: {question}\n\n"
+            f"{postgres_hints}\n\n"
             f"schema:\n{_SCHEMA_CONTEXT}"
         )
         payload = {
@@ -103,13 +128,15 @@ class VoiceSqlPipeline:
                 {'role': 'system', 'content': instruction},
                 {'role': 'user', 'content': user_text},
             ],
-            'temperature': 0.1,
         }
         url = f'{self._base_url()}/responses'
         async with httpx.AsyncClient(timeout=httpx.Timeout(45.0)) as client:
-            response = await client.post(url, headers={**self._headers(), 'Content-Type': 'application/json'}, json=payload)
-            response.raise_for_status()
-            raw = response.json()
+            try:
+                response = await client.post(url, headers={**self._headers(), 'Content-Type': 'application/json'}, json=payload)
+                response.raise_for_status()
+                raw = response.json()
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(self._extract_http_error(exc)) from exc
         output_text = _extract_output_text(raw)
         if not output_text:
             raise RuntimeError('SQL generation returned empty output')
@@ -175,13 +202,15 @@ class VoiceSqlPipeline:
                 {'role': 'system', 'content': system},
                 {'role': 'user', 'content': user},
             ],
-            'temperature': 0.3,
         }
         url = f'{self._base_url()}/responses'
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
-            response = await client.post(url, headers={**self._headers(), 'Content-Type': 'application/json'}, json=payload)
-            response.raise_for_status()
-            raw = response.json()
+            try:
+                response = await client.post(url, headers={**self._headers(), 'Content-Type': 'application/json'}, json=payload)
+                response.raise_for_status()
+                raw = response.json()
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(self._extract_http_error(exc)) from exc
         answer = _extract_output_text(raw).strip()
         if not answer:
             return 'I could not find enough data to answer that confidently yet.'
@@ -201,13 +230,16 @@ class VoiceSqlPipeline:
         }
         url = f'{self._base_url()}/audio/speech'
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-            async with client.stream(
-                'POST',
-                url,
-                headers={**self._headers(), 'Content-Type': 'application/json'},
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                async for chunk in response.aiter_bytes(chunk_size=8192):
-                    if chunk:
-                        yield chunk
+            try:
+                async with client.stream(
+                    'POST',
+                    url,
+                    headers={**self._headers(), 'Content-Type': 'application/json'},
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        if chunk:
+                            yield chunk
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(self._extract_http_error(exc)) from exc
