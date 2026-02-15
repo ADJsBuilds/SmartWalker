@@ -3,6 +3,13 @@ import { AvatarView } from '../components/AvatarView';
 import { LiveAvatarLiteSessionManager, type LiteUiState } from '../lib/liveavatarSession';
 import { toWsBaseUrl } from '../lib/storage';
 import { useRealtimeState } from '../store/realtimeState';
+import { VoiceEndpointDetector } from '../lib/voiceEndpointing';
+
+const VOICE_ENDPOINTING_ENABLED = String(import.meta.env.VITE_VOICE_ENDPOINTING_ENABLED || '').toLowerCase() === 'true';
+const VOICE_STREAMING_ENABLED = String(import.meta.env.VITE_VOICE_STREAMING_ENABLED || '').toLowerCase() === 'true';
+const FALLBACK_RECORDING_TIMEOUT_MS = 4500;
+const STREAM_TIMESLICE_MS = 140;
+const STREAM_BUFFER_CAP_BYTES = 2_000_000;
 
 class PcmStreamPlayer {
   private audioCtx: AudioContext | null = null;
@@ -79,6 +86,16 @@ export function UserView() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaChunksRef = useRef<BlobPart[]>([]);
+  const endpointDetectorRef = useRef<VoiceEndpointDetector | null>(null);
+  const recordingFallbackTimerRef = useRef<number | null>(null);
+  const activeUtteranceRef = useRef<{
+    sessionId: string;
+    sequenceNumber: number;
+    droppedChunks: number;
+    speechEndMs: number | null;
+    lastChunkSentMs: number | null;
+    streamMode: boolean;
+  } | null>(null);
 
   const sessionManager = useMemo(
     () =>
@@ -141,6 +158,16 @@ export function UserView() {
     }
     mediaRecorderRef.current = null;
     mediaChunksRef.current = [];
+    activeUtteranceRef.current = null;
+    if (recordingFallbackTimerRef.current !== null) {
+      window.clearTimeout(recordingFallbackTimerRef.current);
+      recordingFallbackTimerRef.current = null;
+    }
+    const endpointDetector = endpointDetectorRef.current;
+    endpointDetectorRef.current = null;
+    if (endpointDetector) {
+      void endpointDetector.stop();
+    }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
@@ -206,6 +233,7 @@ export function UserView() {
       };
 
       ws.onmessage = (event) => {
+        if (typeof event.data !== 'string') return;
         let payload: unknown;
         try {
           payload = JSON.parse(String(event.data));
@@ -243,6 +271,9 @@ export function UserView() {
           setIsTranscribing(false);
           const detail = String(typed.error || 'Unknown websocket error');
           setErrorText(detail);
+        }
+        if (type === 'latency_metrics') {
+          appendVoiceLog(`sys latency ${JSON.stringify(typed.metrics || typed)}`);
         }
       };
     } catch (error) {
@@ -295,9 +326,46 @@ export function UserView() {
         const recorder = pickedMimeType ? new MediaRecorder(stream, { mimeType: pickedMimeType }) : new MediaRecorder(stream);
         mediaRecorderRef.current = recorder;
         mediaChunksRef.current = [];
+        const trackSettings = stream.getAudioTracks()[0]?.getSettings?.() || {};
+        const sampleRate = Number(trackSettings.sampleRate || 48000);
+        const channels = Number(trackSettings.channelCount || 1);
+        const streamMode = VOICE_STREAMING_ENABLED;
+        const utterance = {
+          sessionId: `utt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          sequenceNumber: 0,
+          droppedChunks: 0,
+          speechEndMs: null as number | null,
+          lastChunkSentMs: null as number | null,
+          streamMode,
+        };
+        activeUtteranceRef.current = utterance;
 
         recorder.ondataavailable = (event: BlobEvent) => {
-          if (event.data.size > 0) mediaChunksRef.current.push(event.data);
+          if (event.data.size <= 0) return;
+          const current = activeUtteranceRef.current;
+          if (!current || !current.streamMode) {
+            mediaChunksRef.current.push(event.data);
+            return;
+          }
+          const ws = voiceWsRef.current;
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          if (ws.bufferedAmount > STREAM_BUFFER_CAP_BYTES) {
+            current.droppedChunks += 1;
+            if (current.droppedChunks % 10 === 1) {
+              appendVoiceLog(`sys stream backpressure: droppedChunks=${current.droppedChunks}`);
+            }
+            return;
+          }
+          current.sequenceNumber += 1;
+          current.lastChunkSentMs = performance.now();
+          sendVoiceEvent({
+            type: 'user_audio_chunk_meta',
+            session_id: current.sessionId,
+            sequence_number: current.sequenceNumber,
+            byte_length: event.data.size,
+            timestamp_ms: Date.now(),
+          });
+          ws.send(event.data);
         };
         recorder.onerror = () => {
           setIsListening(false);
@@ -305,16 +373,49 @@ export function UserView() {
           appendVoiceLog('sys microphone recording error');
         };
         recorder.onstop = () => {
+          if (recordingFallbackTimerRef.current !== null) {
+            window.clearTimeout(recordingFallbackTimerRef.current);
+            recordingFallbackTimerRef.current = null;
+          }
+          const endpointDetector = endpointDetectorRef.current;
+          endpointDetectorRef.current = null;
+          if (endpointDetector) {
+            void endpointDetector.stop();
+          }
           const mimeType = recorder.mimeType || pickedMimeType || 'audio/webm';
-          const blob = new Blob(mediaChunksRef.current, { type: mimeType });
-          mediaChunksRef.current = [];
+          const current = activeUtteranceRef.current;
+          if (current && current.speechEndMs === null) {
+            current.speechEndMs = performance.now();
+          }
           if (mediaStreamRef.current) {
             mediaStreamRef.current.getTracks().forEach((track) => track.stop());
             mediaStreamRef.current = null;
           }
           setIsListening(false);
+          if (current?.streamMode) {
+            appendVoiceLog(
+              `sys recording stopped stream mode session=${current.sessionId} seq=${current.sequenceNumber} dropped=${current.droppedChunks}`,
+            );
+            sendVoiceEvent({
+              type: 'user_audio_end',
+              session_id: current.sessionId,
+              last_sequence_number: current.sequenceNumber,
+              timestamp_ms: Date.now(),
+              speech_end_ms: current.speechEndMs,
+              last_chunk_sent_ms: current.lastChunkSentMs,
+            });
+            activeUtteranceRef.current = null;
+            setIsTranscribing(true);
+            setLatestUserTranscript('Transcribing audio...');
+            return;
+          }
+          const blob = new Blob(mediaChunksRef.current, { type: mimeType });
+          mediaChunksRef.current = [];
           appendVoiceLog(`sys recording stopped mime=${mimeType} bytes=${blob.size}`);
-          if (!blob.size) return;
+          if (!blob.size) {
+            activeUtteranceRef.current = null;
+            return;
+          }
           setIsTranscribing(true);
           setLatestUserTranscript('Transcribing audio...');
           void (async () => {
@@ -325,20 +426,58 @@ export function UserView() {
                 resident_id: activeResidentId,
                 mime_type: blob.type || mimeType,
                 audio_base64: audioBase64,
+                speech_end_ms: current?.speechEndMs ?? performance.now(),
               });
             } catch (error) {
               setIsTranscribing(false);
               setErrorText(error instanceof Error ? error.message : 'Failed to send recorded audio.');
             }
           })();
+          activeUtteranceRef.current = null;
         };
 
         setIsListening(true);
         appendVoiceLog('sys recording started');
-        recorder.start(250);
-        window.setTimeout(() => {
+        if (streamMode) {
+          sendVoiceEvent({
+            type: 'user_audio_start',
+            session_id: utterance.sessionId,
+            codec: pickedMimeType || recorder.mimeType || 'audio/webm',
+            sample_rate: Number.isFinite(sampleRate) ? sampleRate : 48000,
+            channels: Number.isFinite(channels) ? channels : 1,
+            timestamp_ms: Date.now(),
+          });
+        }
+        const endpointDetector = VOICE_ENDPOINTING_ENABLED
+          ? new VoiceEndpointDetector({
+              silenceHangoverMs: 320,
+              minSpeechMs: 250,
+              maxUtteranceMs: 8000,
+              onSpeechStart: () => appendVoiceLog('sys endpoint speech_start'),
+              onSpeechEndCandidate: () => appendVoiceLog('sys endpoint silence_candidate'),
+              onEndpoint: (reason) => {
+                const current = activeUtteranceRef.current;
+                if (current && current.speechEndMs === null) {
+                  current.speechEndMs = performance.now();
+                }
+                appendVoiceLog(`sys endpoint detected reason=${reason}`);
+                if (recorder.state === 'recording') recorder.stop();
+              },
+            })
+          : null;
+        endpointDetectorRef.current = endpointDetector;
+        if (endpointDetector) {
+          try {
+            await endpointDetector.start(stream);
+          } catch (error) {
+            appendVoiceLog(`sys endpoint detector unavailable, fallback timeout (${String(error)})`);
+            endpointDetectorRef.current = null;
+          }
+        }
+        recorder.start(streamMode ? STREAM_TIMESLICE_MS : 250);
+        recordingFallbackTimerRef.current = window.setTimeout(() => {
           if (recorder.state === 'recording') recorder.stop();
-        }, 4500);
+        }, FALLBACK_RECORDING_TIMEOUT_MS);
       } catch (error) {
         setIsListening(false);
         setIsTranscribing(false);

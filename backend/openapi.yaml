@@ -2347,6 +2347,13 @@ x-websockets:
           - data
     /ws/voice-agent:
       summary: 'Voice pipeline websocket: STT -> SQL -> answer -> streaming TTS audio.'
+      description: |
+        Client can use either:
+        1) Legacy one-shot audio (`user_audio` with base64), or
+        2) Chunked streaming mode:
+           - send `user_audio_start` (JSON)
+           - send repeated `user_audio_chunk_meta` (JSON) followed by binary websocket frame bytes
+           - send `user_audio_end` (JSON)
       query:
         residentId:
           type: string
@@ -2364,6 +2371,59 @@ x-websockets:
               type: string
           required:
           - type
+        - type: object
+          properties:
+            type:
+              const: user_audio_start
+            session_id:
+              type: string
+            codec:
+              type: string
+              example: audio/webm;codecs=opus
+            sample_rate:
+              type: integer
+              example: 48000
+            channels:
+              type: integer
+              example: 1
+            timestamp_ms:
+              type: integer
+          required:
+          - type
+          - session_id
+        - type: object
+          properties:
+            type:
+              const: user_audio_chunk_meta
+            session_id:
+              type: string
+            sequence_number:
+              type: integer
+            byte_length:
+              type: integer
+            timestamp_ms:
+              type: integer
+          required:
+          - type
+          - session_id
+          - sequence_number
+        - type: object
+          properties:
+            type:
+              const: user_audio_end
+            session_id:
+              type: string
+            last_sequence_number:
+              type: integer
+            timestamp_ms:
+              type: integer
+            speech_end_ms:
+              type: number
+            last_chunk_sent_ms:
+              type: number
+          required:
+          - type
+          - session_id
         - type: object
           properties:
             type:
@@ -2422,6 +2482,15 @@ x-websockets:
           properties:
             type:
               const: user_transcript
+            user_transcript:
+              type: string
+          required:
+          - type
+          - user_transcript
+        - type: object
+          properties:
+            type:
+              const: user_transcript_partial
             user_transcript:
               type: string
           required:
@@ -2509,6 +2578,26 @@ x-websockets:
           - type
           - stage
           - message
+        - type: object
+          properties:
+            type:
+              const: latency_metrics
+            metrics:
+              type: object
+              properties:
+                speech_end_ms:
+                  type: number
+                last_chunk_sent_ms:
+                  type: number
+                stt_final_ms:
+                  type: integer
+                llm_response_ready_ms:
+                  type: integer
+                tts_start_ms:
+                  type: integer
+          required:
+          - type
+          - metrics
         - type: object
           properties:
             type:

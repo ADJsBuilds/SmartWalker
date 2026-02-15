@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
@@ -27,6 +28,13 @@ Tables:
   activity_state, asymmetry_index, fall_risk_level, fall_risk_score, fog_status, fog_episodes,
   fog_duration_seconds, person_detected, confidence, source_fps, frame_id, steps_merged, tilt_deg, step_var, created_at
 )
+
+Epoch integer columns:
+- walking_sessions.start_ts, walking_sessions.end_ts
+- metric_samples.ts, ingest_events.ts
+- hourly_metric_rollups.bucket_start_ts, exercise_metric_samples.ts
+Never call DATE(...) directly on these integer columns.
+Use to_timestamp(column)::date for date comparisons.
 """.strip()
 
 
@@ -50,6 +58,24 @@ def _extract_output_text(payload: Dict[str, Any]) -> str:
                 if isinstance(text_value, str) and text_value.strip():
                     return text_value.strip()
     return ''
+
+
+def _normalize_postgres_epoch_date_usage(sql: str) -> str:
+    """
+    Guardrail for common LLM SQL mistakes on epoch integer fields.
+    Rewrites DATE(epoch_int_col) to to_timestamp(epoch_int_col)::date.
+    """
+    normalized = sql
+    epoch_cols = [
+        'start_ts',
+        'end_ts',
+        'ts',
+        'bucket_start_ts',
+    ]
+    for col in epoch_cols:
+        pattern = re.compile(rf'DATE\s*\(\s*([A-Za-z_][\w]*\.)?{col}\s*\)', re.IGNORECASE)
+        normalized = pattern.sub(lambda m: f"to_timestamp({m.group(0)[m.group(0).find('(')+1:m.group(0).rfind(')')].strip()})::date", normalized)
+    return normalized
 
 
 class VoiceSqlPipeline:
@@ -113,6 +139,8 @@ class VoiceSqlPipeline:
             "PostgreSQL hints:\\n"
             "- Today filter: DATE(created_at) = CURRENT_DATE\\n"
             "- Recent window: ts >= EXTRACT(EPOCH FROM NOW() - INTERVAL '24 hours')\\n"
+            "- IMPORTANT: start_ts/end_ts/ts/bucket_start_ts are epoch INTEGERs. For date compare use to_timestamp(col)::date\\n"
+            "- Do NOT write DATE(start_ts) or DATE(ts)\\n"
             "- Resident filter: resident_id = '<resident_id>'\\n"
             "- Keep output small with LIMIT 50 unless aggregate query."
         )
@@ -154,9 +182,10 @@ class VoiceSqlPipeline:
         sql = str(parsed.get('sql') or '').strip().rstrip(';')
         if not sql:
             raise RuntimeError('Generated SQL is empty')
-        return sql
+        return _normalize_postgres_epoch_date_usage(sql)
 
     def execute_sql(self, db: Session, sql: str) -> List[Dict[str, Any]]:
+        sql = _normalize_postgres_epoch_date_usage(sql)
         try:
             result = db.execute(text(sql))
         except SQLAlchemyError as exc:
