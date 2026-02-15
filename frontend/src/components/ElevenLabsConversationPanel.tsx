@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ApiClient } from '../lib/apiClient';
-import { getSpeechRecognitionCtor, speakText, type SpeechRecognitionLike } from '../lib/speech';
+import { getSpeechRecognitionCtor, type SpeechRecognitionLike } from '../lib/speech';
 
 type SessionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -27,6 +27,9 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
 
   const wsRef = useRef<WebSocket | null>(null);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const playbackChainRef = useRef<Promise<void>>(Promise.resolve());
+  const nextStartTimeRef = useRef(0);
   const speechSupported = useMemo(() => Boolean(getSpeechRecognitionCtor()), []);
 
   useEffect(() => {
@@ -36,6 +39,10 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
       const ws = wsRef.current;
       if (ws && ws.readyState <= WebSocket.OPEN) ws.close(1000, 'component cleanup');
       wsRef.current = null;
+      if (audioCtxRef.current) {
+        void audioCtxRef.current.close();
+        audioCtxRef.current = null;
+      }
     };
   }, []);
 
@@ -58,6 +65,60 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
     appendLog('out', JSON.stringify(payload));
   };
 
+  const getAudioContext = async (): Promise<AudioContext> => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new AudioContext();
+      nextStartTimeRef.current = 0;
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      await audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  };
+
+  const schedulePlayback = async (audioBuffer: AudioBuffer) => {
+    const ctx = await getAudioContext();
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+    const startAt = Math.max(ctx.currentTime, nextStartTimeRef.current);
+    source.start(startAt);
+    nextStartTimeRef.current = startAt + audioBuffer.duration;
+  };
+
+  const playChunk = async (chunk: AudioChunk) => {
+    const ctx = await getAudioContext();
+    const bytes = decodeBase64ToUint8Array(chunk.base64);
+    if (!bytes.byteLength) return;
+
+    if ((chunk.encoding || '').toLowerCase().includes('pcm')) {
+      const sampleRate = Number(chunk.sampleRate || 16000);
+      const pcmBuffer = pcm16ToAudioBuffer(ctx, bytes, sampleRate);
+      await schedulePlayback(pcmBuffer);
+      return;
+    }
+
+    try {
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      const decoded = await ctx.decodeAudioData(copy.buffer);
+      await schedulePlayback(decoded);
+    } catch {
+      // Fallback to raw PCM if provider omits encoding metadata.
+      const fallback = pcm16ToAudioBuffer(ctx, bytes, Number(chunk.sampleRate || 16000));
+      await schedulePlayback(fallback);
+    }
+  };
+
+  const queueAudioChunk = (chunk: AudioChunk) => {
+    playbackChainRef.current = playbackChainRef.current
+      .then(() => playChunk(chunk))
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Audio playback failed';
+        appendLog('sys', message);
+      });
+  };
+
   const startSession = async () => {
     if (status === 'connecting' || status === 'connected') return;
     setStatus('connecting');
@@ -71,6 +132,7 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
       ws.onopen = () => {
         setStatus('connected');
         appendLog('sys', `Connected (${session.session_id})`);
+        void getAudioContext();
       };
 
       ws.onclose = (event) => {
@@ -95,6 +157,11 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
         const message = payload as Record<string, unknown>;
         const type = String(message.type || '');
         appendLog('in', JSON.stringify(message));
+
+        const audioChunk = extractAudioChunk(message);
+        if (audioChunk) {
+          queueAudioChunk(audioChunk);
+        }
 
         if (type === 'ping') {
           const pingEvent = (message.ping_event as Record<string, unknown> | undefined) || {};
@@ -126,7 +193,6 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
         const agentText = extractEventText(message, ['agent_response', 'response', 'text']);
         if (agentText && (type.includes('agent') || type.includes('response'))) {
           setLastAgentText(agentText);
-          speakText(agentText);
         }
       };
     } catch (error) {
@@ -144,6 +210,8 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
     setIsListening(false);
     setStatus('disconnected');
     appendLog('sys', 'Disconnected');
+    nextStartTimeRef.current = 0;
+    playbackChainRef.current = Promise.resolve();
   };
 
   const sendText = () => {
@@ -256,6 +324,12 @@ export function ElevenLabsConversationPanel({ apiClient, notify }: ElevenLabsCon
   );
 }
 
+interface AudioChunk {
+  base64: string;
+  sampleRate?: number;
+  encoding?: string;
+}
+
 function extractEventText(payload: Record<string, unknown>, candidateKeys: string[]): string {
   for (const key of candidateKeys) {
     const value = payload[key];
@@ -269,5 +343,83 @@ function extractEventText(payload: Record<string, unknown>, candidateKeys: strin
     }
   }
   return '';
+}
+
+function extractAudioChunk(payload: Record<string, unknown>): AudioChunk | null {
+  const topLevel = pickAudioBase64(payload);
+  if (topLevel) {
+    return {
+      base64: topLevel,
+      sampleRate: pickNumber(payload, ['sample_rate', 'sampleRate', 'audio_sample_rate', 'rate']),
+      encoding: pickString(payload, ['encoding', 'audio_encoding', 'format', 'audio_format']),
+    };
+  }
+
+  for (const value of Object.values(payload)) {
+    if (!value || typeof value !== 'object') continue;
+    const nested = value as Record<string, unknown>;
+    const nestedBase64 = pickAudioBase64(nested);
+    if (!nestedBase64) continue;
+    return {
+      base64: nestedBase64,
+      sampleRate: pickNumber(nested, ['sample_rate', 'sampleRate', 'audio_sample_rate', 'rate']),
+      encoding: pickString(nested, ['encoding', 'audio_encoding', 'format', 'audio_format']),
+    };
+  }
+  return null;
+}
+
+function pickAudioBase64(obj: Record<string, unknown>): string | null {
+  const keys = ['audio_base_64', 'audio', 'audio_chunk', 'chunk', 'base64', 'data'];
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (looksLikeBase64(trimmed)) return trimmed;
+  }
+  return null;
+}
+
+function pickNumber(obj: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = Number(obj[key]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return undefined;
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function looksLikeBase64(value: string): boolean {
+  if (value.length < 16) return false;
+  const sanitized = value.replace(/\s+/g, '');
+  return /^[A-Za-z0-9+/=]+$/.test(sanitized);
+}
+
+function decodeBase64ToUint8Array(base64: string): Uint8Array {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function pcm16ToAudioBuffer(ctx: AudioContext, bytes: Uint8Array, sampleRate: number): AudioBuffer {
+  const frameCount = Math.floor(bytes.byteLength / 2);
+  const audioBuffer = ctx.createBuffer(1, frameCount, sampleRate);
+  const channel = audioBuffer.getChannelData(0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < frameCount; i += 1) {
+    const sample = view.getInt16(i * 2, true);
+    channel[i] = sample / 32768;
+  }
+  return audioBuffer;
 }
 
