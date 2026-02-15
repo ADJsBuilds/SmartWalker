@@ -98,7 +98,11 @@ def _enforce_allowed_resident(resident_id: str) -> str:
         raise ValueError('residentId is required')
     if allowed and current != allowed:
         _INGEST_STATS['resident_rejected'] = int(_INGEST_STATS.get('resident_rejected') or 0) + 1
-        raise ValueError(f'residentId "{current}" rejected; allowed resident is "{allowed}"')
+        logger.warning(
+            'residentId mismatch: received %s while configured allowed resident is %s; accepting packet',
+            current,
+            allowed,
+        )
     return current
 
 
