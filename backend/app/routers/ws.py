@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+from app.agents.lite_agent import lite_agent_manager
 from app.db.session import SessionLocal
 from app.services.merge_state import merged_state
 from app.services.voice_sql_pipeline import VoiceSqlPipeline
@@ -48,6 +49,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
     pipeline = VoiceSqlPipeline()
     db = SessionLocal()
     active_resident_id = str(residentId or 'r1')
+    active_liveavatar_session_id: Optional[str] = None
 
     async def _send(payload: dict[str, Any]) -> None:
         await websocket.send_json(payload)
@@ -64,8 +66,10 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
         audio_bytes: Optional[bytes] = None,
         mime_type: str = 'audio/webm',
         client_metrics: Optional[dict[str, Any]] = None,
+        liveavatar_session_id: Optional[str] = None,
     ) -> None:
         transcript = (user_text or '').strip()
+        effective_liveavatar_session_id = (liveavatar_session_id or '').strip() or None
         turn_started = time.perf_counter()
         timeline_ms: dict[str, Any] = {
             'turn_started_ms': int(time.time() * 1000),
@@ -111,10 +115,12 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
             tts_started = time.perf_counter()
             chunk_count = 0
             total_pcm_bytes = 0
+            pcm_accumulator = bytearray()
             await _debug('tts', 'Starting TTS audio stream')
             async for pcm_chunk in pipeline.stream_tts_pcm(answer):
                 chunk_count += 1
                 total_pcm_bytes += len(pcm_chunk)
+                pcm_accumulator.extend(pcm_chunk)
                 await _send(
                     {
                         'type': 'audio_chunk',
@@ -130,6 +136,48 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 elapsed_ms=int((time.perf_counter() - tts_started) * 1000),
             )
             await _send({'type': 'audio_end'})
+            if effective_liveavatar_session_id and pcm_accumulator:
+                avatar_sync_started = time.perf_counter()
+                status = lite_agent_manager.get_status(effective_liveavatar_session_id)
+                await _debug(
+                    'liveavatar_sync_start',
+                    'Forwarding synthesized PCM to LiveAvatar session',
+                    session_id=effective_liveavatar_session_id,
+                    bytes_total=len(pcm_accumulator),
+                    session_exists=bool(status.get('exists')),
+                    ws_connected=bool(status.get('ws_connected')),
+                    ready=bool(status.get('ready')),
+                    session_state=status.get('session_state'),
+                )
+                try:
+                    speak_result = await lite_agent_manager.speak_pcm(
+                        effective_liveavatar_session_id,
+                        bytes(pcm_accumulator),
+                    )
+                    if speak_result.get('ok'):
+                        await _debug(
+                            'liveavatar_sync_ok',
+                            'LiveAvatar sync completed',
+                            session_id=effective_liveavatar_session_id,
+                            chunk_count=speak_result.get('chunk_count'),
+                            elapsed_ms=int((time.perf_counter() - avatar_sync_started) * 1000),
+                        )
+                    else:
+                        await _debug(
+                            'liveavatar_sync_error',
+                            'LiveAvatar sync failed',
+                            session_id=effective_liveavatar_session_id,
+                            error=speak_result.get('error'),
+                            elapsed_ms=int((time.perf_counter() - avatar_sync_started) * 1000),
+                        )
+                except Exception as sync_exc:
+                    await _debug(
+                        'liveavatar_sync_error',
+                        'LiveAvatar sync raised exception',
+                        session_id=effective_liveavatar_session_id,
+                        error=str(sync_exc),
+                        elapsed_ms=int((time.perf_counter() - avatar_sync_started) * 1000),
+                    )
             timeline_ms['turn_completed_ms'] = int(time.time() * 1000)
             await _send({'type': 'latency_metrics', 'metrics': timeline_ms})
             await _debug('turn', 'Completed turn', elapsed_ms=int((time.perf_counter() - turn_started) * 1000))
@@ -162,6 +210,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 'speech_end_ms': end_payload.get('speech_end_ms'),
                 'last_chunk_sent_ms': end_payload.get('last_chunk_sent_ms'),
             },
+            liveavatar_session_id=str(session.get('liveavatar_session_id') or '').strip() or active_liveavatar_session_id,
         )
         audio_sessions.pop(session_id, None)
 
@@ -237,16 +286,26 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                 continue
             if msg_type == 'session.start':
                 maybe_resident = str(payload.get('resident_id') or '').strip()
+                maybe_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip()
                 if maybe_resident:
                     active_resident_id = maybe_resident
-                await _send({'type': 'session.started', 'resident_id': active_resident_id})
+                if maybe_liveavatar_session_id:
+                    active_liveavatar_session_id = maybe_liveavatar_session_id
+                await _send(
+                    {
+                        'type': 'session.started',
+                        'resident_id': active_resident_id,
+                        'liveavatar_session_id': active_liveavatar_session_id,
+                    }
+                )
                 continue
             if msg_type == 'user_message':
                 text_value = str(payload.get('text') or '').strip()
                 if not text_value:
                     await _send({'type': 'error', 'error': 'Empty text message'})
                     continue
-                await _handle_turn(user_text=text_value)
+                turn_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip() or active_liveavatar_session_id
+                await _handle_turn(user_text=text_value, liveavatar_session_id=turn_liveavatar_session_id)
                 continue
             if msg_type == 'user_audio_start':
                 session_id = str(payload.get('session_id') or '').strip()
@@ -255,6 +314,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     continue
                 active_audio_session_id = session_id
                 pending_chunk_meta = None
+                turn_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip() or active_liveavatar_session_id
                 audio_sessions[session_id] = {
                     'mime_type': str(payload.get('codec') or payload.get('mime_type') or 'audio/webm'),
                     'chunks': [],
@@ -264,6 +324,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     'partial_transcript': '',
                     'partial_task': None,
                     'finalizing': False,
+                    'liveavatar_session_id': turn_liveavatar_session_id,
                 }
                 await _debug(
                     'stt',
@@ -272,6 +333,7 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     codec=audio_sessions[session_id]['mime_type'],
                     sample_rate=payload.get('sample_rate'),
                     channels=payload.get('channels'),
+                    liveavatar_session_id=turn_liveavatar_session_id,
                 )
                 continue
             if msg_type == 'user_audio_chunk_meta':
@@ -302,12 +364,14 @@ async def ws_voice_agent(websocket: WebSocket, residentId: Optional[str] = Query
                     await _send({'type': 'error', 'error': 'Invalid base64 audio payload'})
                     continue
                 mime_type = str(payload.get('mime_type') or 'audio/webm').strip() or 'audio/webm'
+                turn_liveavatar_session_id = str(payload.get('liveavatar_session_id') or '').strip() or active_liveavatar_session_id
                 await _handle_turn(
                     audio_bytes=audio,
                     mime_type=mime_type,
                     client_metrics={
                         'speech_end_ms': payload.get('speech_end_ms'),
                     },
+                    liveavatar_session_id=turn_liveavatar_session_id,
                 )
                 continue
 

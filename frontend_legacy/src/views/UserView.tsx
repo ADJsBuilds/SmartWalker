@@ -215,11 +215,16 @@ export function UserView() {
       ws.onopen = () => {
         setVoiceAgentStatus('connected');
         appendVoiceLog(`sys connected ws for resident=${activeResidentId}`);
-        sendVoiceEvent({
+        const startPayload: Record<string, unknown> = {
           type: 'session.start',
           resident_id: activeResidentId,
           text: 'STATE UPDATE:\n- UI: user_view\n- Session intent: short voice back-and-forth coaching',
-        });
+        };
+        const liveavatarSessionId = sessionManager.currentSessionId;
+        if (liveavatarSessionId) {
+          startPayload.liveavatar_session_id = liveavatarSessionId;
+        }
+        sendVoiceEvent(startPayload);
       };
 
       ws.onclose = () => {

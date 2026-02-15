@@ -139,6 +139,38 @@ Content-Type: application/json
 
 The frontend automatically extracts the `video_url` from the response and displays it in a `<video>` element.
 
+## Voice Agent + LiveAvatar LITE Bridge
+
+For real-time coaching, SmartWalker uses a dual-socket model:
+
+- `/ws/voice-agent` is the app websocket for mic audio in, transcript/debug events, and browser PCM playback out.
+- LiveAvatar/HeyGen uses a provider websocket (`ws_url`) managed by backend `lite_agent_manager` for `agent.speak` control events.
+
+### Linking the two sockets
+
+When opening `/ws/voice-agent`, send `liveavatar_session_id` during `session.start`:
+
+```json
+{
+  "type": "session.start",
+  "resident_id": "r1",
+  "liveavatar_session_id": "your_liveavatar_session_id"
+}
+```
+
+The backend voice pipeline will forward the same OpenAI TTS PCM output to both:
+
+- browser `audio_chunk` events on `/ws/voice-agent`
+- LiveAvatar LITE via `agent.speak`/`agent.speak_end` on the provider websocket
+
+### Fallback behavior
+
+If LiveAvatar forwarding fails (session missing, websocket not ready, or provider error), the core voice flow still succeeds:
+
+- transcript and response text are still returned
+- browser audio playback still streams as normal
+- debug events report `liveavatar_sync_error` for observability
+
 ## Error Handling
 
 The integration now includes:
